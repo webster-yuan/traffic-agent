@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import json
 import random
@@ -132,13 +133,19 @@ def _get_examples() -> list[dict[str, Any]]:
     ]
 
 
+def _get_llm_timeout() -> int:
+    """获取 LLM 调用超时时间（秒）"""
+    return getattr(settings, "llm_timeout", 300)
+
+
 def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: str) -> list[TrafficRecord]:
+    """生成流量记录（同步函数，用于 LangGraph 节点）"""
     try:
         logger.info(f"开始调用LLM生成流量: count={count}, industry={industry}, scenario={scenario}")
-        
+
         examples = _get_examples()
         examples_str = "\n".join([json.dumps(e, ensure_ascii=False) for e in examples])
-        
+
         system_prompt = f"""你是网络流量数据生成助手。根据以下行业和场景信息，生成真实的流量数据。
 
 行业: {industry}
@@ -176,24 +183,25 @@ def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: s
             model=settings.ollama_model,
             base_url=settings.ollama_base_url,
             temperature=0.3,
-            timeout=300,
+            timeout=_get_llm_timeout(),
         )
-        
+
         response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
         content = getattr(response, "content", "")
+
         if not content:
             raise ValueError("LLM返回为空")
-        
+
         try:
             result = json.loads(content.strip())
         except json.JSONDecodeError as e:
             logger.warning(f"JSON解析失败，尝试修复: {e}")
             fixed = _fix_json(content.strip())
             result = json.loads(fixed)
-        
+
         if not isinstance(result, list):
             result = [result]
-        
+
         now = datetime.now(timezone.utc)
         records = []
         for i, item in enumerate(result[:count]):
@@ -217,11 +225,11 @@ def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: s
                 identity_label=item.get("identity_label", "real"),
             )
             records.append(record)
-        
+
         real_count = sum(1 for r in records if r.identity_label == "real")
         fake_count = sum(1 for r in records if r.identity_label == "fake")
         logger.info(f"LLM流量生成完成: 共 {len(records)} 条, 真实 {real_count} 条, 脚本 {fake_count} 条")
-        
+
         return records
     except Exception as e:
         logger.exception(f"LLM生成流量失败: {e}")
@@ -275,31 +283,31 @@ def generate_records(count: int, stage: Stage, industry: str) -> list[TrafficRec
 
 def evaluate_quality() -> QualityScore:
     logger.info("开始质量评估...")
-    
+
     # 步骤1: 评估格式质量
     logger.info("步骤1: 评估格式质量")
     format_score = round(random.uniform(82, 98), 1)
     logger.info(f"格式质量评分: {format_score}")
-    
+
     # 步骤2: 评估业务质量
     logger.info("步骤2: 评估业务质量")
     business_score = round(random.uniform(75, 95), 1)
     logger.info(f"业务质量评分: {business_score}")
-    
+
     # 步骤3: 评估多样性质量
     logger.info("步骤3: 评估多样性质量")
     diversity_score = round(random.uniform(70, 93), 1)
     logger.info(f"多样性质量评分: {diversity_score}")
-    
+
     # 步骤4: 计算总分
     logger.info("步骤4: 计算综合质量分数")
     total = round(format_score * 0.3 + business_score * 0.4 + diversity_score * 0.3, 1)
     logger.info(f"综合计算: 格式(30%*{format_score}) + 业务(40%*{business_score}) + 多样性(30%*{diversity_score}) = {total}")
-    
+
     # 步骤5: 判断是否通过
     passed = total >= 70
     logger.info(f"质量评估完成，总分: {total}, 通过标准: >=70, 结果: {'通过' if passed else '未通过'}")
-    
+
     return QualityScore(
         format_score=format_score,
         business_score=business_score,

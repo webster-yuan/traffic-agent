@@ -25,27 +25,24 @@ from app.services.session_service import (
     list_history,
     update_status,
 )
+from app.core.state import add_cancelled, is_cancelled, remove_cancelled
 
 router = APIRouter(prefix="/api/v1/traffic", tags=["traffic"])
 
-_run_lock = asyncio.Lock()
-_cancelled_sessions: set[str] = set()
+_semaphore = asyncio.Semaphore(3)
 
 
-async def _acquire_or_reject() -> None:
-    if _run_lock.locked():
-        raise HTTPException(status_code=429, detail="系统正忙，请稍后重试")
-    await _run_lock.acquire()
+async def _acquire() -> None:
+    await _semaphore.acquire()
 
 
-def _release_if_locked() -> None:
-    if _run_lock.locked():
-        _run_lock.release()
+def _release() -> None:
+    _semaphore.release()
 
 
 @router.post("/generate", response_model=TrafficGenerateResponse)
 async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateResponse:
-    await _acquire_or_reject()
+    await _acquire()
     start_at = time.perf_counter()
     session_id = uuid.uuid4().hex[:12]
     try:
@@ -73,13 +70,13 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             processing_time_ms=int((time.perf_counter() - start_at) * 1000),
         )
     finally:
-        _release_if_locked()
+        _release()
 
 
 @router.post("/generate/stream")
 async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingResponse:
     logger.info(f"收到流式请求: industry={payload.industry}, stage={payload.stage}, count={payload.count}")
-    await _acquire_or_reject()
+    await _acquire()
     session_id = uuid.uuid4().hex[:12]
     logger.info(f"session_id={session_id} 获取锁成功")
 
@@ -160,7 +157,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             logger.info(f"session_id={session_id} 事件流处理完成，共处理 {event_count} 个事件")
 
             # 检查是否被取消
-            if session_id in _cancelled_sessions:
+            if is_cancelled(session_id):
                 logger.warning(f"session_id={session_id} 任务被取消")
                 update_status(session_id, SessionStatus.cancelled)
                 yield "event: cancelled\ndata: {\"message\":\"任务已取消\"}\n\n"
@@ -212,8 +209,8 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             logger.exception(f"session_id={session_id} 发生异常: {e}")
             yield f"event: error\ndata: {{\"message\":\"{str(e)}\"}}\n\n"
         finally:
-            _cancelled_sessions.discard(session_id)
-            _release_if_locked()
+            remove_cancelled(session_id)
+            _release()
             logger.info(f"session_id={session_id} 释放锁")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -221,7 +218,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
 
 @router.delete("/generate/{session_id}")
 async def cancel_generate(session_id: str) -> dict[str, str | bool]:
-    _cancelled_sessions.add(session_id)
+    add_cancelled(session_id)
     update_status(session_id, SessionStatus.cancelled)
     return {"success": True, "session_id": session_id, "message": "任务已终止"}
 

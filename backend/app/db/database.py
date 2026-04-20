@@ -1,15 +1,20 @@
 import sqlite3
+import threading
 from pathlib import Path
 
 from app.core.config import settings
 
+_thread_local = threading.local()
+
 
 def get_connection() -> sqlite3.Connection:
-    db_path = Path(settings.sqlite_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if not hasattr(_thread_local, "conn"):
+        db_path = Path(settings.sqlite_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _thread_local.conn = conn
+    return _thread_local.conn
 
 
 def init_db() -> None:

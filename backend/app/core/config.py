@@ -23,6 +23,9 @@ class Settings(BaseModel):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b-instruct-q4_K_M"
     identity_service_enabled: bool = True
+    llm_timeout: int = 300
+    cleanup_days: int = 30
+    cleanup_interval_hours: int = 24
 
 
 settings = Settings()

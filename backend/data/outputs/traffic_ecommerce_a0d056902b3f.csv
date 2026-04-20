@@ -1,0 +1,1 @@
+id,method,url,status_code,timestamp,src_ip,src_port,dst_ip,dst_port,header,req_body,resp_body,rtt,duration,user_agent,referer,identity_label
