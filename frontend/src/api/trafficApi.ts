@@ -86,12 +86,14 @@ export function generateTrafficStream(
   onStageComplete: (progress: StageComplete) => void,
   onFinalize: (data: Finalize) => void,
   onComplete: (result: Complete) => void,
-  onError: (error: string) => void
+  onError: (error: string) => void,
+  signal?: AbortSignal
 ) {
   fetch(`${API_BASE}/generate/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal,
   }).then(async (res) => {
     if (!res.ok) {
       throw new Error(await res.text())
@@ -160,6 +162,10 @@ export function generateTrafficStream(
     }
     read()
   }).catch((e) => {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      onError('任务已取消')
+      return
+    }
     onError(e.message || '请求失败')
   })
 }

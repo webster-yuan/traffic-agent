@@ -69,8 +69,15 @@ onMounted(async () => {
       <div class="progress">
         <div class="bar" :style="{ width: `${store.progress}%` }"></div>
       </div>
+      <p v-if="store.sessionId" class="meta">Session ID：{{ store.sessionId }}</p>
       <p>{{ store.progressText }}</p>
-      <p class="result">{{ store.resultMessage }}</p>
+      <p v-if="store.downloadPath" class="result">
+        下载链接：
+        <a :href="store.fileUrl(store.sessionId)" target="_blank" rel="noreferrer">
+          {{ store.downloadPath }}
+        </a>
+      </p>
+      <p v-else class="result">{{ store.resultMessage }}</p>
     </section>
 
     <section class="panel">

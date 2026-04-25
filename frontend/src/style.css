@@ -99,6 +99,12 @@ button:disabled {
   color: #059669;
 }
 
+.meta {
+  color: #475569;
+  font-size: 13px;
+  word-break: break-all;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

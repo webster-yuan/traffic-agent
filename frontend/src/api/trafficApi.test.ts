@@ -8,7 +8,6 @@ describe("trafficApi", () => {
   });
 
   it("generateTrafficStream should call correct endpoint", () => {
-    let called = false
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({

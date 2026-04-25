@@ -19,6 +19,13 @@ const INDUSTRY_SCENARIO: Record<string, string> = {
   custom: '自定义场景',
 }
 
+const STAGE_NAME: Record<string, string> = {
+  rag: 'RAG检索',
+  generate: '流量生成',
+  eval: '质量评估',
+  identity: '身份校验',
+}
+
 export const useTrafficStore = defineStore('traffic', {
   state: () => ({
     running: false,
@@ -26,7 +33,9 @@ export const useTrafficStore = defineStore('traffic', {
     progressText: '等待开始',
     progress: 0,
     resultMessage: '',
+    downloadPath: '',
     history: [] as HistoryItem[],
+    abortController: null as AbortController | null,
   }),
   actions: {
     inferScenario(industry: string) {
@@ -41,6 +50,9 @@ export const useTrafficStore = defineStore('traffic', {
       this.progress = 0
       this.progressText = '正在连接...'
       this.resultMessage = ''
+      this.downloadPath = ''
+      this.abortController?.abort()
+      this.abortController = new AbortController()
 
       generateTrafficStream(
         payload,
@@ -50,40 +62,41 @@ export const useTrafficStore = defineStore('traffic', {
           this.progressText = '已连接，开始生成'
         },
         (event) => {
-          const stageMap: Record<string, string> = {
-            rag: 'RAG检索',
-            generate: '流量生成',
-            eval: '质量评估',
-            identity: '身份校验',
-          }
-          this.progressText = `正在${stageMap[event.stage] || event.stage}...`
+          this.progressText = `正在${STAGE_NAME[event.stage] || event.stage}...`
         },
         (event) => {
           this.progress = 90
-          this.progressText = '阶段完成'
+          this.progressText = `${STAGE_NAME[event.stage] || event.stage}完成`
         },
         (event) => {
           this.progress = 95
           this.progressText = '正在生成下载链接...'
-          this.resultMessage = `下载链接: /api/v1/traffic/download/${this.sessionId}`
+          this.downloadPath = event.download_url
+          this.resultMessage = `下载链接: ${event.download_url}`
         },
         () => {
           this.progress = 100
           this.progressText = '生成完成'
           this.running = false
+          this.abortController = null
           this.refreshHistory()
         },
         (error) => {
           this.progressText = `错误: ${error}`
           this.running = false
-        }
+          this.abortController = null
+        },
+        this.abortController.signal
       )
     },
     async stopCurrent() {
-      if (!this.sessionId) return
-      await cancelGenerate(this.sessionId)
+      this.abortController?.abort()
+      if (this.sessionId) {
+        await cancelGenerate(this.sessionId)
+      }
       this.running = false
       this.progressText = '任务已取消'
+      this.abortController = null
     },
     async removeHistory(sessionId: string) {
       await deleteHistory(sessionId)

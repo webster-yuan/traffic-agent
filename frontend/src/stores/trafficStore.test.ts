@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 
 vi.mock("../api/trafficApi", () => ({
-  generateTrafficStream: vi.fn((payload, onStart, onStageStart, onStageComplete, onFinalize, onComplete, onError) => {
+  generateTrafficStream: vi.fn((_payload, onStart, _onStageStart, onStageComplete, onFinalize, onComplete, _onError) => {
     onStart("sess_123")
     onStageComplete({ stage: "generate", status: "success" })
     onFinalize({ download_url: "/download/sess_123" })
