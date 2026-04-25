@@ -249,6 +249,17 @@ cd frontend
 npm test
 ```
 
+### LangGraph CLI 调试
+
+后端可直接在终端启动 LangGraph CLI，用于本地开发和调试图执行。LangSmith 上报由 LangChain/LangGraph 根据环境变量自动处理：
+
+```bash
+cd backend
+langgraph dev --host 127.0.0.1 --port 2024 --config langgraph.json
+```
+
+如需自动上传到 LangSmith，请在 `backend/.env` 中配置 `LANGSMITH_API_KEY`、`LANGCHAIN_TRACING_V2=true` 和 `LANGSMITH_PROJECT`。
+
 ### 代码规范
 
 - Python: 遵循 PEP 8 规范

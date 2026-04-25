@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "traffic": "./app/graph/workflow.py:graph"
+  },
+  "env": ".env"
+}

@@ -16,11 +16,7 @@ from app.graph.nodes import (
 from app.graph.state import GraphState
 
 
-@lru_cache(maxsize=1)
-def get_traffic_graph():
-    checkpoint_path = Path(settings.checkpoint_db_path)
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
+def _build_graph():
     builder = StateGraph(GraphState)
     builder.add_node("rag", rag_node)
     builder.add_node("generate", generate_node)
@@ -36,7 +32,18 @@ def get_traffic_graph():
         {"generate": "generate", "identity": "identity"},
     )
     builder.add_edge("identity", END)
+    return builder
 
+
+@lru_cache(maxsize=1)
+def get_traffic_graph():
+    checkpoint_path = Path(settings.checkpoint_db_path)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+    builder = _build_graph()
     conn = aiosqlite.connect(str(checkpoint_path))
     checkpointer = AsyncSqliteSaver(conn)
     return builder.compile(checkpointer=checkpointer)
+
+
+graph = _build_graph().compile()
