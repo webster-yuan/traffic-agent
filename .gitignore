@@ -52,8 +52,17 @@ coverage.xml
 
 # 数据库
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+backend/data/
+!backend/data/.gitkeep
+
+# LangGraph / LangSmith 本地运行产物
+backend/.langgraph_api/
+backend/.langgraph/
+backend/data/outputs/
 
 # 缓存
 .cache/

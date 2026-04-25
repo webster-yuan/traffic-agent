@@ -22,6 +22,7 @@ Traffic Agent 是一个全栈 AI 应用，结合了 LangGraph、FastAPI 和 Vue.
 - **框架**: FastAPI + Python 3.11+
 - **AI 引擎**: Ollama (Qwen2.5 7B) + LangChain
 - **工作流**: LangGraph (状态图 + 条件边)
+- **可观测性**: LangSmith trace + metadata 关联
 - **数据库**: SQLite (aiosqlite 异步)
 - **验证**: Pydantic
 - **测试**: Pytest
@@ -31,6 +32,10 @@ Traffic Agent 是一个全栈 AI 应用，结合了 LangGraph、FastAPI 和 Vue.
 - **状态管理**: Pinia
 - **组件**: TypeScript + Composition API
 - **测试**: Vitest
+
+### 开发工具
+- **IDE / Agent**: Cursor + GPT-5.5
+- **调试**: Chrome DevTools MCP + LangGraph CLI + LangSmith
 
 ## 快速开始
 
@@ -97,17 +102,18 @@ npm run dev
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | /generate | 生成流量数据（流式响应） |
-| GET | /sessions | 获取会话列表 |
-| GET | /sessions/{id} | 获取会话详情 |
-| DELETE | /generate/{session_id} | 取消生成 |
-| GET | /download/{session_id} | 下载 CSV 文件 |
+| POST | /api/v1/traffic/generate | 生成流量数据（同步响应） |
+| POST | /api/v1/traffic/generate/stream | 生成流量数据（SSE 流式响应） |
+| DELETE | /api/v1/traffic/generate/{session_id} | 取消生成 |
+| GET | /api/v1/traffic/history | 获取历史记录 |
+| DELETE | /api/v1/traffic/history/{session_id} | 删除历史记录 |
+| GET | /api/v1/traffic/download/{session_id} | 下载 CSV 文件 |
 | GET | /health | 健康检查 |
 
 ### 请求示例
 
 ```bash
-curl -X POST "http://localhost:8000/generate" \
+curl -X POST "http://localhost:8000/api/v1/traffic/generate" \
   -H "Content-Type: application/json" \
   -d '{
     "industry": "ecommerce",
@@ -260,6 +266,12 @@ langgraph dev --host 127.0.0.1 --port 2024 --config langgraph.json
 
 如需自动上传到 LangSmith，请在 `backend/.env` 中配置 `LANGSMITH_API_KEY`、`LANGCHAIN_TRACING_V2=true` 和 `LANGSMITH_PROJECT`。
 
+前端触发的数据生成请求会把 `session_id`、行业、阶段、数量和来源写入 LangSmith trace metadata。调试单次请求时，可在 LangSmith 中按 `metadata.session_id` 过滤，实时查看该请求的 LangGraph 节点执行过程。
+
+### Cursor + GPT-5.5 调试流程
+
+本项目开发和联调默认使用 Cursor + GPT-5.5。需要端到端排查前端交互、网络请求和 LangSmith trace 时，可通过 Chrome DevTools MCP 接管本地 Chrome 页面：先在前端页面发起小数据量请求，再用页面显示的 `Session ID` 到 LangSmith 中按 `metadata.session_id` 定位本次运行。
+
 ### 代码规范
 
 - Python: 遵循 PEP 8 规范
@@ -287,6 +299,11 @@ API_PORT=8000
 
 # LLM 超时配置
 LLM_TIMEOUT=120
+
+# LangSmith 追踪
+LANGCHAIN_TRACING_V2=true
+LANGSMITH_API_KEY=your_api_key
+LANGSMITH_PROJECT=traffic-agent
 ```
 
 ### 定时清理
