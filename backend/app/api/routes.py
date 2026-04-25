@@ -18,6 +18,7 @@ from app.models.schemas import (
 from app.graph.workflow import get_traffic_graph
 from app.services.generator import write_csv
 from app.services.graph_runner import build_initial_state, run_generation_graph
+from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
     create_session,
     delete_session,
@@ -108,7 +109,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             event_count = 0
             async for event in graph.astream_events(
                 initial_state,
-                config={"configurable": {"thread_id": f"traffic_{session_id}"}},
+                config=build_graph_config(session_id=session_id, payload=payload),
                 version="v1",
             ):
                 event_count += 1
