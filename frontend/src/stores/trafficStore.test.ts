@@ -68,6 +68,11 @@ describe("trafficStore", () => {
   it("inferScenario should return mapped scenario", () => {
     const store = useTrafficStore();
     expect(store.inferScenario("ride_hailing")).toBe("通勤高峰");
+    expect(store.inferScenario("finance")).toBe("交易高峰");
+    expect(store.inferScenario("healthcare")).toBe("门诊就诊时段");
+    expect(store.inferScenario("media")).toBe("晚间播放高峰");
+    expect(store.inferScenario("social")).toBe("内容互动高峰");
+    expect(store.inferScenario("gaming")).toBe("在线对战时段");
   });
 
   it("retryLastGenerate should rerun the last failed payload", async () => {

@@ -19,6 +19,11 @@ const INDUSTRY_SCENARIO: Record<string, string> = {
   ride_hailing: '通勤高峰',
   logistics: '夜间运输',
   delivery: '饭点高峰',
+  finance: '交易高峰',
+  healthcare: '门诊就诊时段',
+  media: '晚间播放高峰',
+  social: '内容互动高峰',
+  gaming: '在线对战时段',
   custom: '自定义场景',
 }
 
