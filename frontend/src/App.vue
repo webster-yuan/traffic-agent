@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useTrafficStore } from './stores/trafficStore'
 import type { Stage } from './api/trafficApi'
 
@@ -7,6 +7,7 @@ const store = useTrafficStore()
 const industry = ref('ride_hailing')
 const stage = ref<Stage>('standard')
 const count = ref(100)
+const selectedSessionId = ref('')
 
 const industryOptions = [
   { value: 'government', label: '政府机关' },
@@ -24,6 +25,14 @@ async function onSubmit() {
     count: count.value,
     stage: stage.value,
   })
+}
+
+const selectedTask = computed(() =>
+  store.history.find((item) => item.session_id === selectedSessionId.value) || null
+)
+
+function selectTask(sessionId: string) {
+  selectedSessionId.value = selectedSessionId.value === sessionId ? '' : sessionId
 }
 
 onMounted(async () => {
@@ -103,6 +112,7 @@ onMounted(async () => {
             <td>{{ item.record_count }}/{{ item.requested_count }}</td>
             <td>{{ item.quality_score ?? '-' }}</td>
             <td class="row-actions">
+              <button class="ghost neutral" @click="selectTask(item.session_id)">详情</button>
               <a :href="store.fileUrl(item.session_id)" target="_blank" rel="noreferrer">下载</a>
               <button class="danger ghost" @click="store.removeHistory(item.session_id)">删除</button>
             </td>
@@ -112,6 +122,27 @@ onMounted(async () => {
           </tr>
         </tbody>
       </table>
+
+      <div v-if="selectedTask" class="detail-card">
+        <h3>任务详情</h3>
+        <dl>
+          <dt>Session ID</dt>
+          <dd>{{ selectedTask.session_id }}</dd>
+          <dt>状态</dt>
+          <dd>{{ selectedTask.status }}</dd>
+          <dt>Trace Thread</dt>
+          <dd>{{ selectedTask.trace_thread_id || '-' }}</dd>
+          <dt>请求/生成数量</dt>
+          <dd>{{ selectedTask.requested_count }} / {{ selectedTask.record_count }}</dd>
+          <dt>开始时间</dt>
+          <dd>{{ selectedTask.started_at || '-' }}</dd>
+          <dt>完成时间</dt>
+          <dd>{{ selectedTask.completed_at || '-' }}</dd>
+          <dt>错误信息</dt>
+          <dd>{{ selectedTask.error_message || '-' }}</dd>
+        </dl>
+        <p class="meta">可在 LangSmith 中按 metadata.session_id 查询本次请求。</p>
+      </div>
     </section>
   </main>
 </template>

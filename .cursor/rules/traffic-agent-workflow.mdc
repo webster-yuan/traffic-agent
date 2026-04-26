@@ -9,6 +9,8 @@ alwaysApply: true
 - For backend graph execution, preserve the separation between business graph state and observability config. Use `app.services.tracing_config.build_graph_config()` for LangSmith metadata instead of calling LangSmith APIs from routes or graph nodes.
 - For frontend-triggered generation, surface `session_id` in the UI and use it to locate LangSmith traces via `metadata.session_id`.
 - Use `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` for the business backend. Use `langgraph dev --host 127.0.0.1 --port 2024 --config langgraph.json` only for Studio/manual graph debugging.
-- When browser verification is needed, prefer Chrome DevTools MCP to inspect the real page, Network, Console, and LangSmith UI. Keep test generation small, usually `count=2` and `stage=quick`, because local Ollama is resource constrained.
+- After code self-tests, run a real browser scenario with Chrome DevTools MCP whenever frontend, API, LangGraph, task state, or tracing behavior changed. Use `count=2` and `stage=quick`, then inspect page state, Network, Console, and persisted history.
+- For repeated iteration validation, use the project skill `traffic-agent-iteration-validation`.
 - Before committing, run focused backend tests from `backend/` with `.venv\Scripts\python.exe -m pytest ...`, plus frontend `npm test` and `npm run build` when frontend files changed.
 - Commit by concern: LangGraph/observability changes, frontend interaction changes, and docs/runtime-ignore changes should be separate commits.
+- At the end of each task, summarize verification results and note whether the experience should become a Cursor Rule, an Agent Skill, or an MCP configuration. Prefer rules for project habits, skills for reusable multi-step workflows, and MCP only when external systems must be controlled.
