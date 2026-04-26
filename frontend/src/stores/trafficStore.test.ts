@@ -7,7 +7,8 @@ vi.mock("../api/trafficApi", () => ({
   listHistory: vi.fn().mockResolvedValue({ items: [] }),
   cancelGenerate: vi.fn().mockResolvedValue({ success: true }),
   deleteHistory: vi.fn().mockResolvedValue({ success: true }),
-  downloadUrl: (sessionId: string) => `http://localhost/${sessionId}`,
+  downloadUrl: (sessionId: string, format: 'csv' | 'json' = 'csv') =>
+    format === 'json' ? `http://localhost/${sessionId}?format=json` : `http://localhost/${sessionId}`,
   langsmithTraceUrl: (sessionId: string) => `http://langsmith/${sessionId}`,
 }));
 

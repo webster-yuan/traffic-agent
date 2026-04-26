@@ -131,11 +131,12 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <p v-if="store.downloadPath" class="result">
-        下载链接：
-        <a :href="store.fileUrl(store.sessionId)" target="_blank" rel="noreferrer">
-          {{ store.downloadPath }}
-        </a>
+      <p v-if="store.downloadPath" class="result download-links">
+        下载：
+        <a :href="store.fileUrl(store.sessionId, 'csv')" target="_blank" rel="noreferrer">CSV</a>
+        <span class="download-sep">|</span>
+        <a :href="store.fileUrl(store.sessionId, 'json')" target="_blank" rel="noreferrer">JSON</a>
+        <span class="meta-inline">{{ store.downloadPath }}</span>
       </p>
       <p v-else class="result">{{ store.resultMessage }}</p>
     </section>
@@ -211,7 +212,9 @@ onMounted(async () => {
             <td>{{ item.quality_score ?? '-' }}</td>
             <td class="row-actions">
               <button class="ghost neutral" @click="selectTask(item.session_id)">详情</button>
-              <a :href="store.fileUrl(item.session_id)" target="_blank" rel="noreferrer">下载</a>
+              <a :href="store.fileUrl(item.session_id, 'csv')" target="_blank" rel="noreferrer">CSV</a>
+              <span class="download-sep">|</span>
+              <a :href="store.fileUrl(item.session_id, 'json')" target="_blank" rel="noreferrer">JSON</a>
               <button class="danger ghost" @click="store.removeHistory(item.session_id)">删除</button>
             </td>
           </tr>

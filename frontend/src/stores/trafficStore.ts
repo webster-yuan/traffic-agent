@@ -251,8 +251,8 @@ export const useTrafficStore = defineStore('traffic', {
       await deleteHistory(sessionId)
       await this.refreshHistory()
     },
-    fileUrl(sessionId: string) {
-      return downloadUrl(sessionId)
+    fileUrl(sessionId: string, format: 'csv' | 'json' = 'csv') {
+      return downloadUrl(sessionId, format)
     },
     traceUrl(sessionId: string) {
       return langsmithTraceUrl(sessionId)
