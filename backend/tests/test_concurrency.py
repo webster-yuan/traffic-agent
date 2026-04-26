@@ -20,9 +20,11 @@ class TestConcurrency:
             await asyncio.sleep(0.1)  # 模拟处理时间
             _release()
 
-        # 同时发起 5 个请求，应该都能成功
-        tasks = [make_request() for _ in range(5)]
-        asyncio.gather(*tasks)
+        async def run_all() -> None:
+            tasks = [make_request() for _ in range(5)]
+            await asyncio.gather(*tasks)
+
+        asyncio.run(run_all())
 
     def test_semaphore_count_reaches_zero(self):
         """测试当获取 3 个信号量后，计数器应该为 0"""
