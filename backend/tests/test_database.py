@@ -144,7 +144,7 @@ def test_schema_integrity():
     expected_columns = {
         "id", "industry", "scenario", "stage", "status",
         "requested_count", "record_count", "quality_score", "file_path",
-        "trace_thread_id", "trace_metadata", "error_message", "started_at",
+        "quality_detail", "trace_thread_id", "trace_metadata", "error_message", "started_at",
         "completed_at", "created_at", "updated_at"
     }
 

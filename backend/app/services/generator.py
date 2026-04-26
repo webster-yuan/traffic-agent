@@ -330,73 +330,137 @@ def generate_records(count: int, stage: Stage, industry: str) -> list[TrafficRec
     return result
 
 
-def _score_format(records: list[TrafficRecord]) -> float:
+def _dedupe_notes(notes: list[str], cap: int = 16) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in notes:
+        n = n.strip()
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _score_format(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     if not records:
-        return 0
+        return 0.0, ["无记录可评"]
 
-    checks = []
-    for record in records:
-        checks.extend(
-            [
-                bool(record.id),
-                record.method in {"GET", "POST", "PUT", "DELETE"},
-                record.url.startswith("https://"),
-                100 <= record.status_code <= 599,
-                record.src_port > 0,
-                record.dst_port > 0,
-                isinstance(record.header, dict),
-                record.duration is not None and record.duration >= 0,
-                bool(record.user_agent),
-                record.identity_label in {"real", "fake", "anomaly"},
-            ]
-        )
+    notes: list[str] = []
+    checks: list[bool] = []
+    for i, r in enumerate(records):
+        prefix = f"记录 {i + 1}：" if len(records) > 1 else ""
+        c = [
+            (bool(r.id), "id 为空"),
+            (r.method in {"GET", "POST", "PUT", "DELETE"}, f"HTTP 方法不在白名单: {r.method!r}"),
+            (r.url.startswith("https://"), "URL 非 https 开头"),
+            (100 <= r.status_code <= 599, f"状态码不在 100–599: {r.status_code}"),
+            (r.src_port > 0, "源端口无效（需 >0）"),
+            (r.dst_port > 0, "目标端口无效（需 >0）"),
+            (isinstance(r.header, dict), "header 非 JSON 对象"),
+            (r.duration is not None and r.duration >= 0, "duration 缺失或为负"),
+            (bool(r.user_agent), "User-Agent 为空"),
+            (r.identity_label in {"real", "fake", "anomaly"}, f"身份标签非法: {r.identity_label!r}"),
+        ]
+        for ok, msg in c:
+            checks.append(ok)
+            if not ok:
+                notes.append(f"{prefix}{msg}")
 
-    return round(sum(1 for item in checks if item) / len(checks) * 100, 1)
+    score = round(sum(1 for item in checks if item) / len(checks) * 100, 1)
+    return score, _dedupe_notes(notes)
 
 
-def _score_business(records: list[TrafficRecord], industry: str) -> float:
+def _score_business(records: list[TrafficRecord], industry: str) -> tuple[float, list[str]]:
     if not records:
-        return 0
+        return 0.0, ["无记录可评"]
 
     known_paths = _industry_paths().get(industry, [])
-    checks = []
-    for record in records:
-        checks.append(f"api.{industry}.com" in record.url if industry != "custom" else record.url.startswith("https://"))
+    notes: list[str] = []
+    checks: list[bool] = []
+    for i, r in enumerate(records):
+        prefix = f"记录 {i + 1}：" if len(records) > 1 else ""
+        if industry == "custom":
+            ok = r.url.startswith("https://")
+            checks.append(ok)
+            if not ok:
+                notes.append(f"{prefix}行业 custom 时 URL 须为 https 开头")
+        else:
+            ok = f"api.{industry}.com" in r.url
+            checks.append(ok)
+            if not ok:
+                notes.append(f"{prefix}URL 未包含该行业域 api.{industry}.com")
         if known_paths:
-            checks.append(any(path in record.url for path in known_paths))
-        checks.append(record.method != "GET" or record.req_body is None)
-        checks.append(record.identity_label != "fake" or any(token in (record.user_agent or "").lower() for token in ["python", "curl", "go", "scrapy"]))
-        checks.append(record.rtt is None or record.rtt >= 0)
+            path_hit = any(path in r.url for path in known_paths)
+            checks.append(path_hit)
+            if not path_hit:
+                notes.append(f"{prefix}未命中该行业常见路径 {known_paths[:3]}{'…' if len(known_paths) > 3 else ''}")
+        get_ok = r.method != "GET" or r.req_body is None
+        checks.append(get_ok)
+        if not get_ok:
+            notes.append(f"{prefix}GET 请求不应带 body")
+        script_ok = r.identity_label != "fake" or any(
+            token in (r.user_agent or "").lower() for token in ("python", "curl", "go", "scrapy", "urllib", "httpx")
+        )
+        checks.append(script_ok)
+        if not script_ok:
+            notes.append(f"{prefix}标记为 fake 时 User-Agent 未体现脚本/自动化特征")
+        rtt_ok = r.rtt is None or r.rtt >= 0
+        checks.append(rtt_ok)
+        if not rtt_ok:
+            notes.append(f"{prefix}RTT 为负或非法")
 
-    return round(sum(1 for item in checks if item) / len(checks) * 100, 1)
+    score = round(sum(1 for item in checks if item) / len(checks) * 100, 1)
+    return score, _dedupe_notes(notes)
 
 
-def _score_diversity(records: list[TrafficRecord]) -> float:
+def _score_diversity(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     if not records:
-        return 0
+        return 0.0, ["无记录可评"]
 
     count = len(records)
+    notes: list[str] = []
 
     def ratio(values: set[Any], expected: int) -> float:
         return min(len(values) / max(1, min(count, expected)), 1.0)
 
-    url_score = ratio({record.url for record in records}, 3) * 40
-    method_score = ratio({record.method for record in records}, 3) * 25
-    status_score = ratio({record.status_code for record in records}, 3) * 20
-    identity_score = ratio({record.identity_label for record in records}, 2) * 15
-    return round(url_score + method_score + status_score + identity_score, 1)
+    url_set = {r.url for r in records}
+    method_set = {r.method for r in records}
+    status_set = {r.status_code for r in records}
+    id_set = {r.identity_label for r in records}
+
+    if len(url_set) < min(3, count):
+        notes.append(
+            f"URL 不重复条数 {len(url_set)}，在 {count} 条数据下可更丰富（本维度最多 3 类对比）"
+        )
+    if len(method_set) < min(3, count):
+        notes.append(f"HTTP 方法仅 {len(method_set)} 种，可增加方法多样性")
+    if len(status_set) < min(3, count):
+        notes.append(f"状态码仅 {len(status_set)} 种，可覆盖更多业务场景")
+    if len(id_set) < min(2, count):
+        notes.append("身份标签种类偏少，建议同时包含多类 real/fake 等以体现差异")
+
+    url_score = ratio(url_set, 3) * 40
+    method_score = ratio(method_set, 3) * 25
+    status_score = ratio(status_set, 3) * 20
+    identity_score = ratio(id_set, 2) * 15
+    score = round(url_score + method_score + status_score + identity_score, 1)
+    if not notes:
+        notes.append("本维度各子项（URL/方法/状态码/身份）覆盖度可接受，扣分点较少")
+    return score, _dedupe_notes(notes, cap=8)
 
 
 def evaluate_quality(records: list[TrafficRecord], industry: str) -> QualityScore:
     logger.info("开始质量评估...")
 
-    format_score = _score_format(records)
+    format_score, format_notes = _score_format(records)
     logger.info(f"格式质量评分: {format_score}")
 
-    business_score = _score_business(records, industry)
+    business_score, business_notes = _score_business(records, industry)
     logger.info(f"业务质量评分: {business_score}")
 
-    diversity_score = _score_diversity(records)
+    diversity_score, diversity_notes = _score_diversity(records)
     logger.info(f"多样性质量评分: {diversity_score}")
 
     total = round(format_score * 0.3 + business_score * 0.4 + diversity_score * 0.3, 1)
@@ -411,6 +475,9 @@ def evaluate_quality(records: list[TrafficRecord], industry: str) -> QualityScor
         diversity_score=diversity_score,
         total_score=total,
         passed=passed,
+        format_notes=format_notes,
+        business_notes=business_notes,
+        diversity_notes=diversity_notes,
     )
 
 

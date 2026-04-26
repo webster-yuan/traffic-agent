@@ -31,6 +31,9 @@ class QualityScore(BaseModel):
     diversity_score: float
     total_score: float
     passed: bool
+    format_notes: list[str] = Field(default_factory=list)
+    business_notes: list[str] = Field(default_factory=list)
+    diversity_notes: list[str] = Field(default_factory=list)
 
 
 class TrafficRecord(BaseModel):
@@ -71,6 +74,7 @@ class SessionSummary(BaseModel):
     requested_count: int
     record_count: int
     quality_score: float | None
+    quality_detail: QualityScore | None = None
     trace_thread_id: str | None = None
     error_message: str | None = None
     started_at: str | None = None

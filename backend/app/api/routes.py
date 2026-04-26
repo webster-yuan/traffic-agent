@@ -81,8 +81,8 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             session_id=session_id,
             scenario=scenario,
             record_count=len(records),
-            quality_score=float(quality.total_score),
             file_path=file_path,
+            quality=quality,
         )
         return TrafficGenerateResponse(
             success=True,
@@ -267,8 +267,8 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 session_id=session_id,
                 scenario=scenario,
                 record_count=len(records),
-                quality_score=float(quality.total_score),
                 file_path=file_path,
+                quality=quality,
             )
             
             # 发送完成事件

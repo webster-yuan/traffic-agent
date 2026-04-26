@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 
 from app.db.database import get_connection
-from app.models.schemas import SessionStatus, SessionSummary, Stage
+from app.models.schemas import QualityScore, SessionStatus, SessionSummary, Stage
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +70,25 @@ def create_session(
         conn.commit()
 
 
+def _parse_quality_detail(raw: str | None) -> QualityScore | None:
+    if not raw:
+        return None
+    try:
+        return QualityScore.model_validate_json(raw)
+    except (ValueError, TypeError) as e:
+        logger.debug("parse quality_detail failed: %s", e)
+        return None
+
+
 def complete_session(
     session_id: str,
     scenario: str,
     record_count: int,
-    quality_score: float,
     file_path: str,
+    quality: QualityScore,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
+    qj = quality.model_dump_json()
     with get_connection() as conn:
         conn.execute(
             """
@@ -87,6 +98,7 @@ def complete_session(
                 record_count = ?,
                 quality_score = ?,
                 file_path = ?,
+                quality_detail = ?,
                 error_message = NULL,
                 completed_at = ?,
                 updated_at = ?
@@ -96,8 +108,9 @@ def complete_session(
                 SessionStatus.completed.value,
                 scenario,
                 record_count,
-                quality_score,
+                float(quality.total_score),
                 file_path,
+                qj,
                 now,
                 now,
                 session_id,
@@ -178,7 +191,7 @@ def list_history(page: int, page_size: int) -> tuple[int, list[SessionSummary]]:
             """
             SELECT
                 id, industry, scenario, stage, status, requested_count, record_count,
-                quality_score, trace_thread_id, error_message, started_at, completed_at,
+                quality_score, quality_detail, trace_thread_id, error_message, started_at, completed_at,
                 created_at, updated_at
             FROM traffic_sessions
             ORDER BY updated_at DESC, created_at DESC
@@ -196,6 +209,7 @@ def list_history(page: int, page_size: int) -> tuple[int, list[SessionSummary]]:
             requested_count=row["requested_count"],
             record_count=row["record_count"],
             quality_score=row["quality_score"],
+            quality_detail=_parse_quality_detail(row["quality_detail"]),
             trace_thread_id=row["trace_thread_id"],
             error_message=row["error_message"],
             started_at=row["started_at"],

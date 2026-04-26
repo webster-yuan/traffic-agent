@@ -14,6 +14,7 @@ _SESSION_COLUMNS = {
     "started_at": "TEXT",
     "completed_at": "TEXT",
     "updated_at": "TEXT",
+    "quality_detail": "TEXT",
 }
 
 

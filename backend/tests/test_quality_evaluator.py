@@ -61,4 +61,17 @@ class TestQualityEvaluator(unittest.TestCase):
 
         self.assertLess(quality.business_score, 70)
         self.assertFalse(quality.passed)
+        self.assertTrue(quality.business_notes)
+        self.assertTrue(any("api.finance.com" in n for n in quality.business_notes))
+
+    def test_evaluate_quality_populates_dimension_notes(self) -> None:
+        records = [
+            _record(id="record-001", method="POST", url="https://api.finance.com/api/payment/transfer"),
+            _record(id="record-002", method="GET", url="https://api.finance.com/api/account/balance", req_body=None, status_code=201),
+        ]
+        quality = evaluate_quality(records, "finance")
+        self.assertIsInstance(quality.format_notes, list)
+        self.assertIsInstance(quality.business_notes, list)
+        self.assertIsInstance(quality.diversity_notes, list)
+        self.assertGreater(len(quality.diversity_notes), 0)
 
