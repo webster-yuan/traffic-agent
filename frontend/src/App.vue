@@ -35,6 +35,18 @@ function selectTask(sessionId: string) {
   selectedSessionId.value = selectedSessionId.value === sessionId ? '' : sessionId
 }
 
+function formatDuration(ms?: number) {
+  if (ms === undefined) return '-'
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(1)} s`
+}
+
+function stageStatusText(status: string) {
+  if (status === 'completed') return '已完成'
+  if (status === 'running') return '进行中'
+  return '等待中'
+}
+
 onMounted(async () => {
   await store.refreshHistory()
 })
@@ -80,6 +92,25 @@ onMounted(async () => {
       </div>
       <p v-if="store.sessionId" class="meta">Session ID：{{ store.sessionId }}</p>
       <p>{{ store.progressText }}</p>
+      <div class="stage-timeline">
+        <div
+          v-for="step in store.stageSteps"
+          :key="step.stage"
+          class="stage-step"
+          :class="step.status"
+        >
+          <div class="stage-dot"></div>
+          <div class="stage-copy">
+            <strong>{{ step.name }}</strong>
+            <span>{{ stageStatusText(step.status) }}</span>
+            <small>
+              进度 {{ step.progress }}%
+              <template v-if="step.elapsedMs !== undefined"> · 耗时 {{ formatDuration(step.elapsedMs) }}</template>
+              <template v-if="step.retry"> · 重试 {{ step.retry }} 次</template>
+            </small>
+          </div>
+        </div>
+      </div>
       <p v-if="store.downloadPath" class="result">
         下载链接：
         <a :href="store.fileUrl(store.sessionId)" target="_blank" rel="noreferrer">

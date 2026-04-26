@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 
 vi.mock("../api/trafficApi", () => ({
-  generateTrafficStream: vi.fn((_payload, onStart, _onStageStart, onStageComplete, onFinalize, onComplete, _onError) => {
+  generateTrafficStream: vi.fn((_payload, onStart, onStageStart, _onStageProgress, onStageComplete, onFinalize, onComplete, _onError) => {
     onStart("sess_123")
-    onStageComplete({ stage: "generate", status: "success" })
+    onStageStart({ stage: "generate", progress: 45 })
+    onStageComplete({ stage: "generate", status: "success", progress: 60, elapsed_ms: 1200 })
     onFinalize({ download_url: "/download/sess_123" })
     onComplete({ success: true })
   }),
@@ -12,6 +13,7 @@ vi.mock("../api/trafficApi", () => ({
   cancelGenerate: vi.fn().mockResolvedValue({ success: true }),
   deleteHistory: vi.fn().mockResolvedValue({ success: true }),
   downloadUrl: (sessionId: string) => `http://localhost/${sessionId}`,
+  langsmithTraceUrl: (sessionId: string) => `http://langsmith/${sessionId}`,
 }));
 
 import { useTrafficStore } from "./trafficStore";
@@ -32,6 +34,7 @@ describe("trafficStore", () => {
     expect(store.sessionId).toBe("sess_123");
     expect(store.progress).toBe(100);
     expect(store.running).toBe(false);
+    expect(store.stageSteps.find((step) => step.stage === "generate")?.elapsedMs).toBe(1200);
   });
 
   it("inferScenario should return mapped scenario", () => {

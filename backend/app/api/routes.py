@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 import uuid
 import logging
@@ -123,7 +124,14 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 "eval": "质量评估",
                 "identity": "身份校验",
             }
+            stage_progress_map = {
+                "rag": 25,
+                "generate": 60,
+                "eval": 82,
+                "identity": 92,
+            }
             seen_start: set[str] = set()
+            stage_started_at: dict[str, float] = {}
             final_state: dict | None = None
 
             # 发送开始事件
@@ -154,10 +162,16 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 # 阶段开始事件
                 if event_type == "on_chain_start" and node not in seen_start:
                     seen_start.add(node)
+                    stage_started_at[node] = time.perf_counter()
                     logger.info(f"session_id={session_id} 阶段开始: {node}")
+                    payload_data = {
+                        "stage": node,
+                        "name": stage_name_map[node],
+                        "progress": max(stage_progress_map[node] - 15, 10),
+                    }
                     yield (
                         "event: stage_start\n"
-                        f"data: {{\"stage\":\"{node}\",\"name\":\"{stage_name_map[node]}\"}}\n\n"
+                        f"data: {json.dumps(payload_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     )
 
                 # 阶段结束事件
@@ -170,15 +184,29 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                     if node == "eval" and isinstance(output, dict):
                         retries = output.get("retries", 0)
                         logger.info(f"session_id={session_id} 评估阶段进度: 第 {retries} 次重试")
+                        payload_data = {
+                            "stage": "eval",
+                            "retry": retries,
+                            "progress": stage_progress_map["eval"],
+                        }
                         yield (
                             "event: stage_progress\n"
-                            f"data: {{\"stage\":\"eval\",\"retry\":{retries}}}\n\n"
+                            f"data: {json.dumps(payload_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         )
 
                     logger.info(f"session_id={session_id} 阶段完成: {node}")
+                    elapsed_ms = None
+                    if node in stage_started_at:
+                        elapsed_ms = int((time.perf_counter() - stage_started_at[node]) * 1000)
+                    payload_data = {
+                        "stage": node,
+                        "status": "success",
+                        "progress": stage_progress_map[node],
+                        "elapsed_ms": elapsed_ms,
+                    }
                     yield (
                         "event: stage_complete\n"
-                        f"data: {{\"stage\":\"{node}\",\"status\":\"success\"}}\n\n"
+                        f"data: {json.dumps(payload_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     )
                 
                 # 每50个事件记录一次调试信息

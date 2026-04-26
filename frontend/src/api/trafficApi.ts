@@ -70,12 +70,16 @@ export async function cancelGenerate(sessionId: string) {
 
 export type StageProgress = {
   stage: string
-  name: string
+  name?: string
+  progress?: number
+  retry?: number
 }
 
 export type StageComplete = {
   stage: string
   status: string
+  progress?: number
+  elapsed_ms?: number | null
 }
 
 export type Finalize = {
@@ -90,6 +94,7 @@ export function generateTrafficStream(
   payload: GeneratePayload,
   onStart: (sessionId: string) => void,
   onStageStart: (progress: StageProgress) => void,
+  onStageProgress: (progress: StageProgress) => void,
   onStageComplete: (progress: StageComplete) => void,
   onFinalize: (data: Finalize) => void,
   onComplete: (result: Complete) => void,
@@ -128,6 +133,9 @@ export function generateTrafficStream(
               break
             case 'stage_start':
               onStageStart(data)
+              break
+            case 'stage_progress':
+              onStageProgress(data)
               break
             case 'stage_complete':
               onStageComplete(data)
