@@ -40,7 +40,12 @@ Use this skill after completing any iteration task in Traffic Agent:
    - Call `/api/v1/traffic/history?page=1&page_size=1`.
    - Confirm `status`, `requested_count`, `record_count`, `trace_thread_id`, `started_at`, and `completed_at` are correct.
 
-5. Clean up dev servers started for validation.
+5. Update `ROADMAP.md` before committing.
+   - Mark the completed to-do item as done or update its status.
+   - Refresh the current project state if the iteration changed capabilities, risks, or the next recommended task.
+   - Keep this documentation update in the same concern area or in a separate docs commit when appropriate.
+
+6. Clean up dev servers started for validation.
    - Stop only the services started during this validation run.
    - Do not kill user-owned processes unless explicitly requested.
 
@@ -51,6 +56,7 @@ End each iteration with:
 - What changed
 - Automated tests run and results
 - Browser scenario result
+- Whether `ROADMAP.md` was updated before commit
 - Any residual risk or known issue
 - Whether the experience should become:
   - Cursor Rule for project habits

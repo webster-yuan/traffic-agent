@@ -17,7 +17,7 @@
 - 历史记录已支持本地高级筛选：关键字、行业、阶段、状态、日期范围、最低评分。
 - 已扩展金融、医疗、流媒体、社交媒体、游戏服务 5 个行业场景，并将行业特征接入 LLM 提示词。
 - 质量评估已从随机评分升级为基于生成记录的格式、业务匹配和多样性评分。
-- 已沉淀项目 Cursor Rule 和 `traffic-agent-iteration-validation` Skill，用于后续迭代的测试与全链路验证。
+- 已沉淀项目 Cursor Rule 和 `traffic-agent-iteration-validation` Skill，用于后续迭代的测试、全链路验证和提交前路线图同步。
 - 已使用 Chrome DevTools MCP 多次完成 `quick + 2 条` 的本地全链路验证。
 
 ### 当前技术状态
