@@ -290,7 +290,7 @@ New-Item -ItemType Directory -Force -Path $profile | Out-Null
 
 - Python: 遵循 PEP 8 规范
 - TypeScript: 使用 ESLint + Prettier
-- 提交消息: 使用 Conventional Commits 格式
+- 提交消息: 使用与仓库历史一致的前缀 + 中文说明，例如 `[ADD]`、`[DOC]`、`[FIX]`（如 `[ADD]扩展业务行业场景`），避免与 Conventional Commits 英文混用
 
 ### 环境变量配置
 
