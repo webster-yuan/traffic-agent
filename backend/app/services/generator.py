@@ -464,3 +464,34 @@ def write_csv(session_id: str, records: list[TrafficRecord], industry: str) -> s
                 ]
             )
     return str(file_path)
+
+
+def write_traffic_json(
+    session_id: str,
+    records: list[TrafficRecord],
+    industry: str,
+    *,
+    scenario: str,
+    quality: QualityScore,
+    stage: Stage,
+) -> str:
+    """Write a JSON bundle with metadata and records (for debugging and downstream tooling)."""
+    output_dir = Path(settings.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = output_dir / f"traffic_{industry}_{session_id}.json"
+    created_at = datetime.now(timezone.utc).isoformat()
+    body = {
+        "metadata": {
+            "session_id": session_id,
+            "created_at": created_at,
+            "industry": industry,
+            "scenario": scenario,
+            "stage": stage.value,
+            "quality": quality.model_dump(),
+            "total_records": len(records),
+        },
+        "records": [r.model_dump(mode="json") for r in records],
+    }
+    with file_path.open("w", encoding="utf-8") as f:
+        json.dump(body, f, ensure_ascii=False, indent=2)
+    return str(file_path)

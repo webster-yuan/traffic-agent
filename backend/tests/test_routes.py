@@ -1,4 +1,6 @@
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -50,6 +52,8 @@ class TestRoutes(unittest.TestCase):
                 "generated_records": [rec],
             },
         ), patch("app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"), patch(
+            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+        ), patch(
             "app.api.routes.create_session", lambda *args, **kwargs: None
         ):
             resp = self.client.post(
@@ -99,6 +103,8 @@ class TestRoutes(unittest.TestCase):
 
         with patch("app.api.routes.get_traffic_graph", lambda: FakeGraph()), patch(
             "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"
+        ), patch(
+            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
         ), patch("app.api.routes.create_session", lambda *args, **kwargs: None):
             resp = self.client.post(
                 "/api/v1/traffic/generate/stream",
@@ -110,3 +116,22 @@ class TestRoutes(unittest.TestCase):
         self.assertIn("\"stage\":\"rag\"", text)
         self.assertIn("\"stage\":\"eval\"", text)
         self.assertIn("event: complete", text)
+
+    def test_download_json_serves_sidecar_file(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            csv_p = Path(d) / "traffic_x_abc123.csv"
+            json_p = Path(d) / "traffic_x_abc123.json"
+            csv_p.write_text("h\n", encoding="utf-8")
+            json_p.write_text('{"metadata":{"ok":true}}', encoding="utf-8")
+            with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
+                resp = self.client.get("/api/v1/traffic/download/abc123?format=json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["metadata"]["ok"])
+
+    def test_download_json_404_when_sidecar_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            csv_p = Path(d) / "traffic_x_abc123.csv"
+            csv_p.write_text("h\n", encoding="utf-8")
+            with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
+                resp = self.client.get("/api/v1/traffic/download/abc123?format=json")
+        self.assertEqual(resp.status_code, 404)

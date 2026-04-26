@@ -4,7 +4,7 @@ import time
 import uuid
 import logging
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ from app.models.schemas import (
     TrafficGenerateResponse,
 )
 from app.graph.workflow import get_traffic_graph
-from app.services.generator import write_csv
+from app.services.generator import write_csv, write_traffic_json
 from app.services.graph_runner import build_initial_state, run_generation_graph
 from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
@@ -69,6 +69,14 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
         quality = graph_result["quality_score"]
         records = graph_result["generated_records"]
         file_path = write_csv(session_id, records, payload.industry)
+        write_traffic_json(
+            session_id,
+            records,
+            payload.industry,
+            scenario=scenario,
+            quality=quality,
+            stage=payload.stage,
+        )
         complete_session(
             session_id=session_id,
             scenario=scenario,
@@ -243,6 +251,15 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             logger.info(f"session_id={session_id} 开始写入CSV文件")
             file_path = write_csv(session_id, records, payload.industry)
             logger.info(f"session_id={session_id} CSV文件写入完成: {file_path}")
+            write_traffic_json(
+                session_id,
+                records,
+                payload.industry,
+                scenario=scenario,
+                quality=quality,
+                stage=payload.stage,
+            )
+            logger.info(f"session_id={session_id} JSON 文件写入完成")
             
             # 创建会话记录
             logger.info(f"session_id={session_id} 创建会话记录")
@@ -281,14 +298,29 @@ async def cancel_generate(session_id: str) -> dict[str, str | bool]:
 
 
 @router.get("/download/{session_id}")
-async def download_csv(session_id: str) -> FileResponse:
+async def download_traffic(
+    session_id: str,
+    file_format: Literal["csv", "json"] = Query("csv", alias="format"),
+) -> FileResponse:
     file_path = get_session_file(session_id)
     if not file_path:
         raise HTTPException(status_code=404, detail="文件不存在")
-    file = Path(file_path)
-    if not file.exists():
+    path = Path(file_path)
+    if not path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(path=file, filename=file.name, media_type="text/csv")
+    if file_format == "json":
+        path = path.with_suffix(".json")
+        if not path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="JSON 文件不存在，该任务可能为旧数据或需重新生成",
+            )
+        return FileResponse(
+            path=path,
+            filename=path.name,
+            media_type="application/json",
+        )
+    return FileResponse(path=path, filename=path.name, media_type="text/csv")
 
 
 @router.get("/history")
