@@ -24,6 +24,7 @@ export interface HistoryItem {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000/api/v1/traffic'
+const LANGSMITH_PROJECT_URL = import.meta.env.VITE_LANGSMITH_PROJECT_URL ?? ''
 
 export async function generateTraffic(payload: GeneratePayload) {
   const res = await fetch(`${API_BASE}/generate`, {
@@ -178,4 +179,11 @@ export function generateTrafficStream(
 
 export function downloadUrl(sessionId: string) {
   return `${API_BASE}/download/${sessionId}`
+}
+
+export function langsmithTraceUrl(sessionId: string) {
+  if (!LANGSMITH_PROJECT_URL) return ''
+  const url = new URL(LANGSMITH_PROJECT_URL)
+  url.searchParams.set('search', `metadata.session_id:${sessionId}`)
+  return url.toString()
 }

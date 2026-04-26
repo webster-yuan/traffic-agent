@@ -4,6 +4,7 @@ import {
   deleteHistory,
   downloadUrl,
   generateTrafficStream,
+  langsmithTraceUrl,
   listHistory,
   type GeneratePayload,
   type HistoryItem,
@@ -104,6 +105,9 @@ export const useTrafficStore = defineStore('traffic', {
     },
     fileUrl(sessionId: string) {
       return downloadUrl(sessionId)
+    },
+    traceUrl(sessionId: string) {
+      return langsmithTraceUrl(sessionId)
     },
   },
 })

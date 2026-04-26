@@ -141,7 +141,18 @@ onMounted(async () => {
           <dt>错误信息</dt>
           <dd>{{ selectedTask.error_message || '-' }}</dd>
         </dl>
-        <p class="meta">可在 LangSmith 中按 metadata.session_id 查询本次请求。</p>
+        <p class="meta">
+          LangSmith 查询条件：
+          <code>metadata.session_id:{{ selectedTask.session_id }}</code>
+        </p>
+        <p v-if="store.traceUrl(selectedTask.session_id)" class="result">
+          <a :href="store.traceUrl(selectedTask.session_id)" target="_blank" rel="noreferrer">
+            打开 LangSmith Trace
+          </a>
+        </p>
+        <p v-else class="meta">
+          如需一键跳转，请配置前端环境变量 VITE_LANGSMITH_PROJECT_URL。
+        </p>
       </div>
     </section>
   </main>

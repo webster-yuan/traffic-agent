@@ -1,5 +1,7 @@
 import os
 import logging
+from typing import Any
+
 from app.core.config import settings
 from app.core.state import is_cancelled
 from app.graph.state import GraphState
@@ -12,7 +14,7 @@ logger = logging.getLogger(__name__)
 if os.environ.get("LANGCHAIN_TRACING_V2") == "true":
     from langsmith.run_helpers import traceable
 else:
-    def traceable(name):
+    def traceable(*args, **kwargs):
         def decorator(func):
             return func
         return decorator
@@ -34,7 +36,51 @@ def _default_quality() -> QualityScore:
     )
 
 
-@traceable("rag_node")
+def _record_field(record: Any, field: str) -> Any:
+    if isinstance(record, dict):
+        return record.get(field)
+    return getattr(record, field, None)
+
+
+def _summarize_generate_output(state: GraphState) -> dict[str, Any]:
+    records = state.get("generated_records", []) or []
+    identity_counts: dict[str, int] = {}
+    for record in records:
+        identity = _record_field(record, "identity_label") or "unknown"
+        identity_counts[str(identity)] = identity_counts.get(str(identity), 0) + 1
+
+    sample_record = None
+    if records:
+        first = records[0]
+        sample_record = {
+            "method": _record_field(first, "method"),
+            "url": _record_field(first, "url"),
+            "status_code": _record_field(first, "status_code"),
+            "identity_label": _record_field(first, "identity_label"),
+            "user_agent": _record_field(first, "user_agent"),
+        }
+
+    hint = ""
+    for case in reversed(state.get("retrieved_cases", []) or []):
+        if isinstance(case, dict) and case.get("type") == "llm_hint":
+            hint = str(case.get("content", ""))
+            break
+
+    stage = state.get("stage")
+    return {
+        "session_id": state.get("session_id"),
+        "industry": state.get("industry"),
+        "scenario": state.get("scenario"),
+        "stage": getattr(stage, "value", stage),
+        "requested_count": state.get("count"),
+        "generated_count": len(records),
+        "identity_counts": identity_counts,
+        "hint": hint[:120],
+        "sample_record": sample_record,
+    }
+
+
+@traceable(name="rag_node")
 def rag_node(state: GraphState) -> GraphState:
     _check_cancelled(state["session_id"])
     logger.info(f"session_id={state['session_id']} RAG检索开始")
@@ -51,7 +97,7 @@ def rag_node(state: GraphState) -> GraphState:
     return state
 
 
-@traceable("generate_node")
+@traceable(name="generate_node", process_outputs=_summarize_generate_output)
 def generate_node(state: GraphState) -> GraphState:
     _check_cancelled(state["session_id"])
     logger.info(f"session_id={state['session_id']} 流量生成开始")
@@ -74,7 +120,7 @@ def generate_node(state: GraphState) -> GraphState:
     return state
 
 
-@traceable("eval_node")
+@traceable(name="eval_node")
 def eval_node(state: GraphState) -> GraphState:
     _check_cancelled(state["session_id"])
     logger.info(f"session_id={state['session_id']} 质量评估开始 (第 {state['retries'] + 1} 次)")
@@ -94,7 +140,7 @@ def eval_node(state: GraphState) -> GraphState:
     return state
 
 
-@traceable("identity_node")
+@traceable(name="identity_node")
 def identity_node(state: GraphState) -> GraphState:
     _check_cancelled(state["session_id"])
     logger.info(f"session_id={state['session_id']} 身份校验开始")
