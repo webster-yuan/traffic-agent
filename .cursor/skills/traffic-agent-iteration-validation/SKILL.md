@@ -47,9 +47,18 @@ Use this skill after completing any iteration task in Traffic Agent:
    - Refresh the current project state if the iteration changed capabilities, risks, or the next recommended task.
    - Keep this documentation update in the same concern area or in a separate docs commit when appropriate.
 
-6. Clean up dev servers started for validation.
-   - Stop only the services started during this validation run.
-   - Do not kill user-owned processes unless explicitly requested.
+6. **Always** clean up dev servers you started for this run (mandatory before finishing the task).
+   - Stop the **backend** (uvicorn) and **frontend** (`npm run dev`) you started for Traffic Agent validation.
+   - If you started a **Chrome** instance only for MCP (e.g. `--remote-debugging-port=9222` with a temp `--user-data-dir`), close that process as well.
+   - Do not kill unrelated processes or servers the user already had running on other ports.
+   - **Windows (PowerShell)**: find listener PIDs then stop, e.g. for ports used in this session:
+     ```powershell
+     8000,5173 | ForEach-Object {
+       Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue |
+         ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+     }
+     ```
+     Adjust port list to match what you started (e.g. `8001,5174`). If you recorded PIDs when spawning `Start-Process`, `Stop-Process -Id <pid> -Force` is preferred.
 
 ## Final Summary Template
 
@@ -59,6 +68,7 @@ End each iteration with:
 - Automated tests run and results
 - Browser scenario result
 - Whether `ROADMAP.md` was updated before commit
+- Whether local **backend/frontend** (and MCP Chrome, if started) were **stopped** after validation
 - Any residual risk or known issue
 - Whether the experience should become:
   - Cursor Rule for project habits
