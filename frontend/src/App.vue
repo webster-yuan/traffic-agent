@@ -44,6 +44,7 @@ function formatDuration(ms?: number) {
 function stageStatusText(status: string) {
   if (status === 'completed') return '已完成'
   if (status === 'running') return '进行中'
+  if (status === 'failed') return '失败'
   return '等待中'
 }
 
@@ -92,6 +93,13 @@ onMounted(async () => {
       </div>
       <p v-if="store.sessionId" class="meta">Session ID：{{ store.sessionId }}</p>
       <p>{{ store.progressText }}</p>
+      <div v-if="store.errorMessage" class="error-card">
+        <strong>生成失败</strong>
+        <p>{{ store.errorMessage }}</p>
+        <button :disabled="store.running" class="ghost neutral" @click="store.retryLastGenerate">
+          重试上次请求
+        </button>
+      </div>
       <div class="stage-timeline">
         <div
           v-for="step in store.stageSteps"

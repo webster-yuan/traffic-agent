@@ -29,7 +29,7 @@ const STAGE_NAME: Record<string, string> = {
   identity: '身份校验',
 }
 
-type StageStatus = 'pending' | 'running' | 'completed'
+type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 type StageStep = {
   stage: string
@@ -58,6 +58,8 @@ export const useTrafficStore = defineStore('traffic', {
     progressText: '等待开始',
     progress: 0,
     stageSteps: createStageSteps(),
+    errorMessage: '',
+    lastPayload: null as GeneratePayload | null,
     resultMessage: '',
     downloadPath: '',
     history: [] as HistoryItem[],
@@ -99,11 +101,20 @@ export const useTrafficStore = defineStore('traffic', {
       this.progress = Math.max(this.progress, event.progress ?? this.progress)
       this.progressText = `${step.name}完成`
     },
+    markRunningStageFailed() {
+      const step =
+        this.stageSteps.find((item) => item.status === 'running') ||
+        this.stageSteps.find((item) => item.status === 'pending')
+      if (step) step.status = 'failed'
+    },
     async startGenerate(payload: GeneratePayload) {
       this.running = true
+      this.sessionId = ''
       this.progress = 0
       this.progressText = '正在连接...'
       this.resetStageSteps()
+      this.errorMessage = ''
+      this.lastPayload = { ...payload }
       this.resultMessage = ''
       this.downloadPath = ''
       this.abortController?.abort()
@@ -139,12 +150,19 @@ export const useTrafficStore = defineStore('traffic', {
           this.refreshHistory()
         },
         (error) => {
-          this.progressText = `错误: ${error}`
+          this.errorMessage = error
+          this.progressText = error === '任务已取消' ? '任务已取消' : `错误: ${error}`
+          if (error !== '任务已取消') this.markRunningStageFailed()
           this.running = false
           this.abortController = null
+          this.refreshHistory()
         },
         this.abortController.signal
       )
+    },
+    async retryLastGenerate() {
+      if (!this.lastPayload || this.running) return
+      await this.startGenerate(this.lastPayload)
     },
     async stopCurrent() {
       this.abortController?.abort()
@@ -153,6 +171,7 @@ export const useTrafficStore = defineStore('traffic', {
       }
       this.running = false
       this.progressText = '任务已取消'
+      this.errorMessage = ''
       this.abortController = null
     },
     async removeHistory(sessionId: string) {

@@ -26,6 +26,27 @@ export interface HistoryItem {
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000/api/v1/traffic'
 const LANGSMITH_PROJECT_URL = import.meta.env.VITE_LANGSMITH_PROJECT_URL ?? ''
 
+async function responseErrorMessage(res: Response) {
+  const text = await res.text()
+  if (!text) return `请求失败 (${res.status})`
+
+  try {
+    const data = JSON.parse(text)
+    if (typeof data.detail === 'string') return data.detail
+    if (typeof data.message === 'string') return data.message
+  } catch {
+    // Fall back to raw response text below.
+  }
+
+  return text
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === 'AbortError') return '任务已取消'
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
 export async function generateTraffic(payload: GeneratePayload) {
   const res = await fetch(`${API_BASE}/generate`, {
     method: 'POST',
@@ -33,7 +54,7 @@ export async function generateTraffic(payload: GeneratePayload) {
     body: JSON.stringify(payload),
   })
   if (!res.ok) {
-    throw new Error(await res.text())
+    throw new Error(await responseErrorMessage(res))
   }
   return res.json()
 }
@@ -41,7 +62,7 @@ export async function generateTraffic(payload: GeneratePayload) {
 export async function listHistory(page = 1, pageSize = 20) {
   const res = await fetch(`${API_BASE}/history?page=${page}&page_size=${pageSize}`)
   if (!res.ok) {
-    throw new Error(await res.text())
+    throw new Error(await responseErrorMessage(res))
   }
   return res.json() as Promise<{
     total: number
@@ -55,7 +76,7 @@ export async function listHistory(page = 1, pageSize = 20) {
 export async function deleteHistory(sessionId: string) {
   const res = await fetch(`${API_BASE}/history/${sessionId}`, { method: 'DELETE' })
   if (!res.ok) {
-    throw new Error(await res.text())
+    throw new Error(await responseErrorMessage(res))
   }
   return res.json()
 }
@@ -63,7 +84,7 @@ export async function deleteHistory(sessionId: string) {
 export async function cancelGenerate(sessionId: string) {
   const res = await fetch(`${API_BASE}/generate/${sessionId}`, { method: 'DELETE' })
   if (!res.ok) {
-    throw new Error(await res.text())
+    throw new Error(await responseErrorMessage(res))
   }
   return res.json()
 }
@@ -107,15 +128,14 @@ export function generateTrafficStream(
     body: JSON.stringify(payload),
     signal,
   }).then(async (res) => {
-    if (!res.ok) {
-      throw new Error(await res.text())
-    }
+    if (!res.ok) throw new Error(await responseErrorMessage(res))
     const reader = res.body?.getReader()
     if (!reader) throw new Error('No response body')
 
     const decoder = new TextDecoder()
     let buffer = ''
     let currentEventType = ''
+    let streamFinished = false
 
     const processLine = (line: string) => {
       if (line.startsWith('event:')) {
@@ -144,10 +164,16 @@ export function generateTrafficStream(
               onFinalize(data)
               break
             case 'complete':
+              streamFinished = true
               onComplete(data)
               break
             case 'cancelled':
+              streamFinished = true
               onError(data.message || '任务已取消')
+              break
+            case 'error':
+              streamFinished = true
+              onError(data.message || data.detail || '生成失败')
               break
           }
         } catch {
@@ -162,6 +188,7 @@ export function generateTrafficStream(
         const { done, value } = await reader.read()
         if (done) {
           if (buffer) processLine(buffer)
+          if (!streamFinished) onError('连接已结束，但未收到完成事件')
           return
         }
         buffer += decoder.decode(value, { stream: true })
@@ -172,16 +199,12 @@ export function generateTrafficStream(
         }
         read()
       } catch (e) {
-        onError(String(e))
+        onError(errorMessage(e))
       }
     }
     read()
   }).catch((e) => {
-    if (e instanceof DOMException && e.name === 'AbortError') {
-      onError('任务已取消')
-      return
-    }
-    onError(e.message || '请求失败')
+    onError(errorMessage(e) || '请求失败')
   })
 }
 
