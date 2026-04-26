@@ -18,6 +18,7 @@
 - 已扩展金融、医疗、流媒体、社交媒体、游戏服务 5 个行业场景，并将行业特征接入 LLM 提示词。
 - 质量评估已从随机评分升级为基于生成记录的格式、业务匹配和多样性评分。
 - 数据导出已扩展：与 CSV 同目录写入 `metadata + records` 结构的 JSON；下载接口支持 `?format=json`；前端提供 CSV / JSON 分链接。
+- 已在 **Chrome 远程调试（9222）+ DevTools MCP** 下按 Skill 跑通 `quick + 2` 全链路：结果区与历史表 **CSV | JSON**、`generate/stream` 与 `history` 200、控制台无 error 级问题。
 - 已沉淀项目 Cursor Rule 和 `traffic-agent-iteration-validation` Skill，用于后续迭代的测试、全链路验证和提交前路线图同步。
 - 已使用 Chrome DevTools MCP 多次完成 `quick + 2 条` 的本地全链路验证。
 

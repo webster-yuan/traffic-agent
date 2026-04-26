@@ -29,10 +29,12 @@ Use this skill after completing any iteration task in Traffic Agent:
      - frontend: `$env:VITE_API_BASE='http://127.0.0.1:8001/api/v1/traffic'; npm run dev -- --host 127.0.0.1 --port 5174`
 
 3. Run a real browser scenario with Chrome DevTools MCP.
+   - **Chrome 调试端口**: MCP 需连接已启用远程调试的 Chrome。可用临时用户目录启动，例如（Windows）：`& 'C:\Program Files\Google\Chrome\Application\chrome.exe' --remote-debugging-port=9222 --user-data-dir=%TEMP%\traffic-agent-chrome-mcp-profile`，并确认 `http://127.0.0.1:9222/json/version` 可访问。详见仓库 `README.md`「Chrome DevTools MCP」。
    - Open the frontend page.
    - Use `stage=quick` and `count=2`.
    - Submit generation.
-   - Verify the page shows `Session ID`, task progress, final download link, and a new history row.
+   - Verify the page shows `Session ID`, task progress, final download area（含 **CSV / JSON** 等约定链接）, and a new history row.
+   - 等待全链路完成时，优先等待当前 `session_id` 对应的下载路径片段（如 `/api/v1/traffic/download/{session_id}`）出现在结果区，避免用「重试」等易与说明文案（如「最多重试」）撞车的关键词驱动 `wait_for`。
    - Inspect Network for `generate/stream` and `history` returning `200`.
    - Inspect Console for errors.
 

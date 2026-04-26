@@ -13,7 +13,7 @@ Traffic Agent 是一个全栈 AI 应用，结合了 LangGraph、FastAPI 和 Vue.
 - 📊 **质量评分**: 自动评估数据格式、业务逻辑和多样性
 - 🚀 **实时流式**: SSE 流式传输进度和结果
 - 📈 **多模式支持**: quick/standard/full 三种生成模式
-- 🗄️ **持久化存储**: SQLite 数据库 + CSV 文件导出
+- 🗄️ **持久化存储**: SQLite 数据库 + CSV / JSON 文件导出（JSON 含 `metadata` 与完整 `records`，便于二次处理与调试）
 - 🧪 **测试覆盖**: 包含 API、并发、取消、数据库等测试
 
 ## 技术栈
@@ -107,7 +107,7 @@ npm run dev
 | DELETE | /api/v1/traffic/generate/{session_id} | 取消生成 |
 | GET | /api/v1/traffic/history | 获取历史记录 |
 | DELETE | /api/v1/traffic/history/{session_id} | 删除历史记录 |
-| GET | /api/v1/traffic/download/{session_id} | 下载 CSV 文件 |
+| GET | /api/v1/traffic/download/{session_id} | 下载结果文件。默认 `format=csv`；`?format=json` 返回同会话的 JSON 包（与 CSV 同目录侧车文件，旧任务若无 JSON 会返回 404） |
 | GET | /health | 健康检查 |
 
 ### 请求示例
@@ -155,7 +155,7 @@ traffic-agent/
 │   │   ├── test_database.py
 │   │   └── test_llm_timeout.py
 │   ├── data/                   # 数据目录
-│   │   └── outputs/            # 生成的 CSV 文件
+│   │   └── outputs/            # 生成的 CSV 与 JSON（runtime，勿提交）
 │   ├── cleanup.py              # 清理脚本
 │   ├── cleanup_schedule.py     # 定时清理
 │   └── requirements.txt
@@ -268,9 +268,23 @@ langgraph dev --host 127.0.0.1 --port 2024 --config langgraph.json
 
 前端触发的数据生成请求会把 `session_id`、行业、阶段、数量和来源写入 LangSmith trace metadata。调试单次请求时，可在 LangSmith 中按 `metadata.session_id` 过滤，实时查看该请求的 LangGraph 节点执行过程。
 
+### Chrome DevTools MCP（端到端与 Network / Console）
+
+Cursor 的 **user-chrome-devtools** MCP 通过 Chrome 的远程调试协议连接本机。请先单独启动一个带调试端口的 Chrome（与日常使用的个人资料隔离，避免争用）：
+
+```powershell
+# 示例：调试端口 9222，使用临时用户目录
+$profile = Join-Path $env:TEMP "traffic-agent-chrome-mcp-profile"
+New-Item -ItemType Directory -Force -Path $profile | Out-Null
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 --user-data-dir=$profile
+```
+
+确认 `http://127.0.0.1:9222/json/version` 可访问后，即可在智能体侧用 MCP 打开 `http://127.0.0.1:5173/` 等本地前端完成联调。验证流程建议与项目 Skill **traffic-agent-iteration-validation** 一致：本地前后端 + `stage=quick`、`count=2`，检查 `generate/stream` / `history` 与结果区 **CSV | JSON** 链接。
+
 ### Cursor + GPT-5.5 调试流程
 
-本项目开发和联调默认使用 Cursor + GPT-5.5。需要端到端排查前端交互、网络请求和 LangSmith trace 时，可通过 Chrome DevTools MCP 接管本地 Chrome 页面：先在前端页面发起小数据量请求，再用页面显示的 `Session ID` 到 LangSmith 中按 `metadata.session_id` 定位本次运行。
+本项目开发和联调默认使用 Cursor + GPT-5.5。需要端到端排查前端交互、网络请求和 LangSmith trace 时，可在上述 Chrome 实例中发起小数据量请求，再用页面显示的 `Session ID` 到 LangSmith 中按 `metadata.session_id` 定位本次运行。
 
 ### 代码规范
 
