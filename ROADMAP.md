@@ -1,7 +1,7 @@
 # Traffic Agent 待办事项与路线图
 
 **更新日期**: 2026-04-26
-**重点**: 稳定生成链路已跑通，下一阶段转向业务丰富度和质量评估
+**重点**: 业务场景和质量评分已增强，下一阶段转向数据导出与评估解释性
 
 ---
 
@@ -15,21 +15,23 @@
 - 生成链路已支持阶段时间线，展示 RAG、流量生成、质量评估、身份校验的状态、进度和耗时。
 - 流式生成错误处理已增强，支持 SSE `error`、非 2xx、断流未完成、取消等场景，并提供“重试上次请求”入口。
 - 历史记录已支持本地高级筛选：关键字、行业、阶段、状态、日期范围、最低评分。
+- 已扩展金融、医疗、流媒体、社交媒体、游戏服务 5 个行业场景，并将行业特征接入 LLM 提示词。
+- 质量评估已从随机评分升级为基于生成记录的格式、业务匹配和多样性评分。
 - 已沉淀项目 Cursor Rule 和 `traffic-agent-iteration-validation` Skill，用于后续迭代的测试与全链路验证。
 - 已使用 Chrome DevTools MCP 多次完成 `quick + 2 条` 的本地全链路验证。
 
 ### 当前技术状态
 
-- 后端：FastAPI + LangGraph + SQLite checkpoint/session persistence + LangSmith tracing。
+- 后端：FastAPI + LangGraph + SQLite checkpoint/session persistence + LangSmith tracing + deterministic quality scoring。
 - 前端：Vue 3 + Pinia + Vite，已具备任务详情、阶段进度、错误重试、历史筛选。
 - 运行约束：本地 Ollama 模型较慢，建议后续全链路测试继续使用 `quick + 2 条`。
 - 运行产物：数据库 WAL/SHM、CSV 输出、LangGraph 临时目录应继续作为 runtime artifacts，不进入提交。
 
 ### 下一步建议
 
-1. 优先做 **扩展行业场景**，让生成数据从“可调试”转向“更像真实业务”。
-2. 随后做 **质量评估增强**，把当前随机评分升级为基于生成记录的可解释评分。
-3. 再做 **数据导出格式扩展**，增加 JSON 导出，方便调试和二次处理。
+1. 优先做 **数据导出格式扩展**，增加 JSON 导出，方便调试和二次处理。
+2. 随后做 **质量评估解释性增强**，在任务详情中展示各维度评分和扣分原因。
+3. 再做 **响应式布局优化** 或 **批量生成功能**，根据使用频率选择。
 
 ## 一、全局追踪与监控
 
@@ -509,7 +511,7 @@ async function startGenerate(payload: GeneratePayload) {
 ### 3.1 扩展行业场景
 
 **优先级**: 🟡 中
-**状态**: ⏭️ 建议下一个迭代
+**状态**: ✅ 已完成第一版
 
 #### 当前行业
 - government
@@ -518,6 +520,11 @@ async function startGenerate(payload: GeneratePayload) {
 - ride_hailing
 - logistics
 - delivery
+- finance
+- healthcare
+- media
+- social
+- gaming
 - custom
 
 #### 建议新增
@@ -554,7 +561,7 @@ INDUSTRY_SCENARIOS = {
 ### 3.2 质量评估增强
 
 **优先级**: 🟡 中
-**状态**: ⏳ 待做
+**状态**: ✅ 已完成第一版（确定性评分）；⏳ 待补评分解释详情
 
 #### 扩展评估维度
 
@@ -775,8 +782,8 @@ export interface BatchTaskStatus {
 
 - [x] 请求可视化面板（第一版）
 - [x] 历史记录高级筛选
-- [ ] 扩展行业场景
-- [ ] 质量评估增强
+- [x] 扩展行业场景
+- [x] 质量评估增强（第一版）
 
 ### 第三阶段（2周）
 
@@ -804,6 +811,7 @@ export interface BatchTaskStatus {
 - [x] 所有追踪功能正常工作
 - [x] 前端可视化准确反映状态
 - [x] 错误处理覆盖主要场景
+- [x] 质量评分基于生成记录而非随机数
 
 ### 用户体验
 - [x] 请求追踪信息清晰可见

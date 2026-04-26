@@ -12,5 +12,6 @@ alwaysApply: true
 - After code self-tests, run a real browser scenario with Chrome DevTools MCP whenever frontend, API, LangGraph, task state, or tracing behavior changed. Use `count=2` and `stage=quick`, then inspect page state, Network, Console, and persisted history.
 - For repeated iteration validation, use the project skill `traffic-agent-iteration-validation`.
 - Before committing, run focused backend tests from `backend/` with `.venv\Scripts\python.exe -m pytest ...`, plus frontend `npm test` and `npm run build` when frontend files changed.
+- Before committing a completed to-do item, update `ROADMAP.md` to reflect the completed work, current project state, and the next recommended task.
 - Commit by concern: LangGraph/observability changes, frontend interaction changes, and docs/runtime-ignore changes should be separate commits.
 - At the end of each task, summarize verification results and note whether the experience should become a Cursor Rule, an Agent Skill, or an MCP configuration. Prefer rules for project habits, skills for reusable multi-step workflows, and MCP only when external systems must be controlled.
