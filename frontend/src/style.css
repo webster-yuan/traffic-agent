@@ -219,6 +219,22 @@ td {
   align-items: center;
 }
 
+.history-filter {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(3, 0.8fr);
+  gap: 10px;
+  align-items: end;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.history-filter button {
+  height: 37px;
+}
+
 .detail-card {
   margin-top: 16px;
   border: 1px solid #e5e7eb;
@@ -257,6 +273,10 @@ a {
   }
 
   .stage-timeline {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .history-filter {
     grid-template-columns: 1fr 1fr;
   }
 }

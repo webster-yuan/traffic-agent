@@ -19,6 +19,13 @@ const industryOptions = [
   { value: 'custom', label: '自定义' },
 ]
 
+const statusOptions = [
+  { value: 'processing', label: '处理中' },
+  { value: 'completed', label: '已完成' },
+  { value: 'failed', label: '失败' },
+  { value: 'cancelled', label: '已取消' },
+]
+
 async function onSubmit() {
   await store.startGenerate({
     industry: industry.value,
@@ -130,6 +137,53 @@ onMounted(async () => {
 
     <section class="panel">
       <h2>历史记录</h2>
+      <div class="history-filter">
+        <label>
+          关键字
+          <input v-model="store.historyFilters.keyword" type="search" placeholder="Session / 场景 / 错误" />
+        </label>
+        <label>
+          行业
+          <select v-model="store.historyFilters.industry">
+            <option value="">全部行业</option>
+            <option v-for="item in industryOptions" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </option>
+          </select>
+        </label>
+        <label>
+          阶段
+          <select v-model="store.historyFilters.stage">
+            <option value="">全部阶段</option>
+            <option value="quick">快速</option>
+            <option value="standard">标准</option>
+            <option value="full">完整</option>
+          </select>
+        </label>
+        <label>
+          状态
+          <select v-model="store.historyFilters.status">
+            <option value="">全部状态</option>
+            <option v-for="item in statusOptions" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </option>
+          </select>
+        </label>
+        <label>
+          开始日期
+          <input v-model="store.historyFilters.dateFrom" type="date" />
+        </label>
+        <label>
+          结束日期
+          <input v-model="store.historyFilters.dateTo" type="date" />
+        </label>
+        <label>
+          最低评分
+          <input v-model="store.historyFilters.minQuality" type="number" min="0" max="100" placeholder="如 80" />
+        </label>
+        <button class="ghost neutral" @click="store.resetHistoryFilters">重置筛选</button>
+      </div>
+      <p class="meta">已显示 {{ store.filteredHistory.length }} / {{ store.history.length }} 条历史记录</p>
       <table>
         <thead>
           <tr>
@@ -143,7 +197,7 @@ onMounted(async () => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in store.history" :key="item.session_id">
+          <tr v-for="item in store.filteredHistory" :key="item.session_id">
             <td>{{ item.session_id }}</td>
             <td>{{ item.industry }}</td>
             <td>{{ item.stage }}</td>
@@ -156,8 +210,8 @@ onMounted(async () => {
               <button class="danger ghost" @click="store.removeHistory(item.session_id)">删除</button>
             </td>
           </tr>
-          <tr v-if="store.history.length === 0">
-            <td colspan="7">暂无记录</td>
+          <tr v-if="store.filteredHistory.length === 0">
+            <td colspan="7">暂无匹配记录</td>
           </tr>
         </tbody>
       </table>
