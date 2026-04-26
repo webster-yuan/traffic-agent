@@ -125,7 +125,7 @@ def eval_node(state: GraphState) -> GraphState:
     _check_cancelled(state["session_id"])
     logger.info(f"session_id={state['session_id']} 质量评估开始 (第 {state['retries'] + 1} 次)")
 
-    quality = evaluate_quality()
+    quality = evaluate_quality(state["generated_records"], state["industry"])
     state["quality_score"] = quality
     state["quality_passed"] = quality.passed
     logger.info(f"session_id={state['session_id']} 质量评估结果: 总分={quality.total_score}, {'通过' if quality.passed else '未通过'}")

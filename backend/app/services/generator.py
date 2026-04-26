@@ -74,7 +74,13 @@ def _random_port() -> int:
 
 
 def _random_url(industry: str) -> str:
-    paths = {
+    paths = _industry_paths()
+    path = random.choice(paths.get(industry, ["/api/endpoint"]))
+    return f"https://api.{industry}.com{path}"
+
+
+def _industry_paths() -> dict[str, list[str]]:
+    return {
         "government": ["/api/office/doc", "/api/approval/send", "/api/user/info"],
         "ecommerce": ["/api/product/list", "/api/order/create", "/api/cart/add"],
         "short_video": ["/api/video/feed", "/api/like", "/api/comment/list"],
@@ -87,8 +93,6 @@ def _random_url(industry: str) -> str:
         "social": ["/api/feed/timeline", "/api/relation/follow", "/api/message/send"],
         "gaming": ["/api/matchmaking/join", "/api/battle/sync", "/api/player/heartbeat"],
     }
-    path = random.choice(paths.get(industry, ["/api/endpoint"]))
-    return f"https://api.{industry}.com{path}"
 
 
 def _random_body(industry: str) -> dict[str, Any]:
@@ -326,30 +330,78 @@ def generate_records(count: int, stage: Stage, industry: str) -> list[TrafficRec
     return result
 
 
-def evaluate_quality() -> QualityScore:
+def _score_format(records: list[TrafficRecord]) -> float:
+    if not records:
+        return 0
+
+    checks = []
+    for record in records:
+        checks.extend(
+            [
+                bool(record.id),
+                record.method in {"GET", "POST", "PUT", "DELETE"},
+                record.url.startswith("https://"),
+                100 <= record.status_code <= 599,
+                record.src_port > 0,
+                record.dst_port > 0,
+                isinstance(record.header, dict),
+                record.duration is not None and record.duration >= 0,
+                bool(record.user_agent),
+                record.identity_label in {"real", "fake", "anomaly"},
+            ]
+        )
+
+    return round(sum(1 for item in checks if item) / len(checks) * 100, 1)
+
+
+def _score_business(records: list[TrafficRecord], industry: str) -> float:
+    if not records:
+        return 0
+
+    known_paths = _industry_paths().get(industry, [])
+    checks = []
+    for record in records:
+        checks.append(f"api.{industry}.com" in record.url if industry != "custom" else record.url.startswith("https://"))
+        if known_paths:
+            checks.append(any(path in record.url for path in known_paths))
+        checks.append(record.method != "GET" or record.req_body is None)
+        checks.append(record.identity_label != "fake" or any(token in (record.user_agent or "").lower() for token in ["python", "curl", "go", "scrapy"]))
+        checks.append(record.rtt is None or record.rtt >= 0)
+
+    return round(sum(1 for item in checks if item) / len(checks) * 100, 1)
+
+
+def _score_diversity(records: list[TrafficRecord]) -> float:
+    if not records:
+        return 0
+
+    count = len(records)
+
+    def ratio(values: set[Any], expected: int) -> float:
+        return min(len(values) / max(1, min(count, expected)), 1.0)
+
+    url_score = ratio({record.url for record in records}, 3) * 40
+    method_score = ratio({record.method for record in records}, 3) * 25
+    status_score = ratio({record.status_code for record in records}, 3) * 20
+    identity_score = ratio({record.identity_label for record in records}, 2) * 15
+    return round(url_score + method_score + status_score + identity_score, 1)
+
+
+def evaluate_quality(records: list[TrafficRecord], industry: str) -> QualityScore:
     logger.info("开始质量评估...")
 
-    # 步骤1: 评估格式质量
-    logger.info("步骤1: 评估格式质量")
-    format_score = round(random.uniform(82, 98), 1)
+    format_score = _score_format(records)
     logger.info(f"格式质量评分: {format_score}")
 
-    # 步骤2: 评估业务质量
-    logger.info("步骤2: 评估业务质量")
-    business_score = round(random.uniform(75, 95), 1)
+    business_score = _score_business(records, industry)
     logger.info(f"业务质量评分: {business_score}")
 
-    # 步骤3: 评估多样性质量
-    logger.info("步骤3: 评估多样性质量")
-    diversity_score = round(random.uniform(70, 93), 1)
+    diversity_score = _score_diversity(records)
     logger.info(f"多样性质量评分: {diversity_score}")
 
-    # 步骤4: 计算总分
-    logger.info("步骤4: 计算综合质量分数")
     total = round(format_score * 0.3 + business_score * 0.4 + diversity_score * 0.3, 1)
     logger.info(f"综合计算: 格式(30%*{format_score}) + 业务(40%*{business_score}) + 多样性(30%*{diversity_score}) = {total}")
 
-    # 步骤5: 判断是否通过
     passed = total >= 70
     logger.info(f"质量评估完成，总分: {total}, 通过标准: >=70, 结果: {'通过' if passed else '未通过'}")
 
