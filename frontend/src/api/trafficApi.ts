@@ -12,12 +12,18 @@ export interface HistoryItem {
   scenario: string
   stage: Stage
   status: string
+  requested_count: number
   record_count: number
   quality_score: number | null
+  trace_thread_id: string | null
+  error_message: string | null
+  started_at: string | null
+  completed_at: string | null
   created_at: string
+  updated_at: string | null
 }
 
-const API_BASE = 'http://127.0.0.1:8000/api/v1/traffic'
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000/api/v1/traffic'
 
 export async function generateTraffic(payload: GeneratePayload) {
   const res = await fetch(`${API_BASE}/generate`, {

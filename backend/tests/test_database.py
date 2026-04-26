@@ -43,7 +43,13 @@ def test_connection_thread_local():
 
     # 在连接1上执行操作
     conn1.execute(
-        "INSERT INTO traffic_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        """
+        INSERT INTO traffic_sessions (
+            id, industry, scenario, stage, status, record_count,
+            quality_score, file_path, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
         (
             "test-thread-local",
             "test",
@@ -75,7 +81,13 @@ def test_transaction_isolation():
     def write_and_commit(sid: str):
         conn = get_connection()
         conn.execute(
-            "INSERT INTO traffic_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO traffic_sessions (
+                id, industry, scenario, stage, status, record_count,
+                quality_score, file_path, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 sid,
                 "ecommerce",
@@ -131,7 +143,9 @@ def test_schema_integrity():
 
     expected_columns = {
         "id", "industry", "scenario", "stage", "status",
-        "record_count", "quality_score", "file_path", "created_at"
+        "requested_count", "record_count", "quality_score", "file_path",
+        "trace_thread_id", "trace_metadata", "error_message", "started_at",
+        "completed_at", "created_at", "updated_at"
     }
 
     assert columns == expected_columns, f"Expected {expected_columns}, got {columns}"

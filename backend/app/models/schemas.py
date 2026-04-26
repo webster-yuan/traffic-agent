@@ -68,6 +68,12 @@ class SessionSummary(BaseModel):
     scenario: str
     stage: Stage
     status: SessionStatus
+    requested_count: int
     record_count: int
     quality_score: float | None
+    trace_thread_id: str | None = None
+    error_message: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
     created_at: str
+    updated_at: str | None = None

@@ -20,8 +20,10 @@ from app.services.generator import write_csv
 from app.services.graph_runner import build_initial_state, run_generation_graph
 from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
+    complete_session,
     create_session,
     delete_session,
+    fail_session,
     get_session_file,
     list_history,
     update_status,
@@ -46,20 +48,31 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
     await _acquire()
     start_at = time.perf_counter()
     session_id = uuid.uuid4().hex[:12]
+    graph_config = build_graph_config(session_id=session_id, payload=payload)
+    create_session(
+        session_id=session_id,
+        industry=payload.industry,
+        scenario="",
+        stage=payload.stage,
+        status=SessionStatus.processing,
+        requested_count=payload.count,
+        record_count=0,
+        quality_score=None,
+        file_path=None,
+        trace_thread_id=graph_config["configurable"]["thread_id"],
+        trace_metadata=graph_config["metadata"],
+    )
     try:
         graph_result = run_generation_graph(session_id=session_id, payload=payload)
         scenario = graph_result["scenario"]
         quality = graph_result["quality_score"]
         records = graph_result["generated_records"]
         file_path = write_csv(session_id, records, payload.industry)
-        create_session(
+        complete_session(
             session_id=session_id,
-            industry=payload.industry,
             scenario=scenario,
-            stage=payload.stage,
-            status=SessionStatus.completed,
             record_count=len(records),
-            quality_score=quality.total_score,
+            quality_score=float(quality.total_score),
             file_path=file_path,
         )
         return TrafficGenerateResponse(
@@ -70,6 +83,9 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             generated_data=records,
             processing_time_ms=int((time.perf_counter() - start_at) * 1000),
         )
+    except Exception as e:
+        fail_session(session_id, str(e))
+        raise
     finally:
         _release()
 
@@ -79,6 +95,20 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
     logger.info(f"收到流式请求: industry={payload.industry}, stage={payload.stage}, count={payload.count}")
     await _acquire()
     session_id = uuid.uuid4().hex[:12]
+    graph_config = build_graph_config(session_id=session_id, payload=payload)
+    create_session(
+        session_id=session_id,
+        industry=payload.industry,
+        scenario="",
+        stage=payload.stage,
+        status=SessionStatus.processing,
+        requested_count=payload.count,
+        record_count=0,
+        quality_score=None,
+        file_path=None,
+        trace_thread_id=graph_config["configurable"]["thread_id"],
+        trace_metadata=graph_config["metadata"],
+    )
     logger.info(f"session_id={session_id} 获取锁成功")
 
     async def event_stream() -> AsyncGenerator[str, None]:
@@ -109,7 +139,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             event_count = 0
             async for event in graph.astream_events(
                 initial_state,
-                config=build_graph_config(session_id=session_id, payload=payload),
+                config=graph_config,
                 version="v1",
             ):
                 event_count += 1
@@ -188,14 +218,11 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             
             # 创建会话记录
             logger.info(f"session_id={session_id} 创建会话记录")
-            create_session(
+            complete_session(
                 session_id=session_id,
-                industry=payload.industry,
                 scenario=scenario,
-                stage=payload.stage,
-                status=SessionStatus.completed,
                 record_count=len(records),
-                quality_score=quality.total_score,
+                quality_score=float(quality.total_score),
                 file_path=file_path,
             )
             
@@ -208,6 +235,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             yield "event: complete\ndata: {\"success\":true}\n\n"
         except Exception as e:
             logger.exception(f"session_id={session_id} 发生异常: {e}")
+            fail_session(session_id, str(e))
             yield f"event: error\ndata: {{\"message\":\"{str(e)}\"}}\n\n"
         finally:
             remove_cancelled(session_id)

@@ -88,6 +88,7 @@ onMounted(async () => {
             <th>Session</th>
             <th>行业</th>
             <th>阶段</th>
+            <th>状态</th>
             <th>数量</th>
             <th>评分</th>
             <th>操作</th>
@@ -98,7 +99,8 @@ onMounted(async () => {
             <td>{{ item.session_id }}</td>
             <td>{{ item.industry }}</td>
             <td>{{ item.stage }}</td>
-            <td>{{ item.record_count }}</td>
+            <td>{{ item.status }}</td>
+            <td>{{ item.record_count }}/{{ item.requested_count }}</td>
             <td>{{ item.quality_score ?? '-' }}</td>
             <td class="row-actions">
               <a :href="store.fileUrl(item.session_id)" target="_blank" rel="noreferrer">下载</a>
@@ -106,7 +108,7 @@ onMounted(async () => {
             </td>
           </tr>
           <tr v-if="store.history.length === 0">
-            <td colspan="6">暂无记录</td>
+            <td colspan="7">暂无记录</td>
           </tr>
         </tbody>
       </table>
