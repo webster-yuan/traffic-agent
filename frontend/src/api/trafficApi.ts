@@ -6,6 +6,17 @@ export interface GeneratePayload {
   stage: Stage
 }
 
+export interface QualityDetail {
+  format_score: number
+  business_score: number
+  diversity_score: number
+  total_score: number
+  passed: boolean
+  format_notes: string[]
+  business_notes: string[]
+  diversity_notes: string[]
+}
+
 export interface HistoryItem {
   session_id: string
   industry: string
@@ -15,6 +26,7 @@ export interface HistoryItem {
   requested_count: number
   record_count: number
   quality_score: number | null
+  quality_detail: QualityDetail | null
   trace_thread_id: string | null
   error_message: string | null
   started_at: string | null

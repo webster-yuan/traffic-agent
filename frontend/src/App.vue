@@ -242,6 +242,33 @@ onMounted(async () => {
           <dt>错误信息</dt>
           <dd>{{ selectedTask.error_message || '-' }}</dd>
         </dl>
+        <div v-if="selectedTask.quality_detail" class="quality-detail">
+          <h4>质量评估（与 JSON <code>metadata.quality</code> 一致）</h4>
+          <p class="meta">
+            综合 {{ selectedTask.quality_detail.total_score }} 分 · 格式
+            {{ selectedTask.quality_detail.format_score }} · 业务 {{ selectedTask.quality_detail.business_score }} · 多样性
+            {{ selectedTask.quality_detail.diversity_score }}
+            · {{ selectedTask.quality_detail.passed ? '通过' : '未通过' }}（阈值 ≥70）
+          </p>
+          <div class="quality-col">
+            <strong>格式维度</strong>
+            <ul>
+              <li v-for="(n, i) in selectedTask.quality_detail.format_notes" :key="'f' + i">{{ n }}</li>
+            </ul>
+          </div>
+          <div class="quality-col">
+            <strong>业务维度</strong>
+            <ul>
+              <li v-for="(n, i) in selectedTask.quality_detail.business_notes" :key="'b' + i">{{ n }}</li>
+            </ul>
+          </div>
+          <div class="quality-col">
+            <strong>多样性维度</strong>
+            <ul>
+              <li v-for="(n, i) in selectedTask.quality_detail.diversity_notes" :key="'d' + i">{{ n }}</li>
+            </ul>
+          </div>
+        </div>
         <p class="meta">
           LangSmith 查询条件：
           <code>metadata.session_id:{{ selectedTask.session_id }}</code>

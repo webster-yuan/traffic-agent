@@ -27,6 +27,7 @@ function historyItem(overrides: Partial<HistoryItem>): HistoryItem {
     requested_count: 2,
     record_count: 2,
     quality_score: 88,
+    quality_detail: null,
     trace_thread_id: "traffic_sess_001",
     error_message: null,
     started_at: null,
