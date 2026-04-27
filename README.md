@@ -280,7 +280,7 @@ New-Item -ItemType Directory -Force -Path $profile | Out-Null
   --remote-debugging-port=9222 --user-data-dir=$profile
 ```
 
-确认 `http://127.0.0.1:9222/json/version` 可访问后，即可在智能体侧用 MCP 打开 `http://127.0.0.1:5173/` 等本地前端完成联调。验证流程建议与项目 Skill **traffic-agent-iteration-validation** 一致：本地前后端 + `stage=quick`、`count=2`，检查 `generate/stream` / `history` 与结果区 **CSV | JSON** 链接。
+确认 `http://127.0.0.1:9222/json/version` 可访问后，即可在智能体侧用 MCP 打开 `http://127.0.0.1:5173/` 等本地前端完成联调。验证流程以 Skill **traffic-agent-iteration-validation** 为准（含：先启动本段 Chrome 命令、再连 MCP）：本地前后端 + `stage=quick`、`count=2`，检查 `generate/stream` / `history` 与结果区 **CSV | JSON | Parquet** 链接。
 
 ### Cursor + GPT-5.5 调试流程
 

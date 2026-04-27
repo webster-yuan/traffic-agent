@@ -1,7 +1,7 @@
 # Traffic Agent 待办事项与路线图
 
 **更新日期**: 2026-04-26
-**重点**: 质量详情已可解释（各维度分与说明）；下一优先项为 Parquet/报表/批量 等择一
+**重点**: 质量详情与 Parquet 导出已就绪；下一优先项为 报表/批量生成/响应式 中按产品排序择一
 
 ---
 
@@ -17,8 +17,8 @@
 - 历史记录已支持本地高级筛选：关键字、行业、阶段、状态、日期范围、最低评分。
 - 已扩展金融、医疗、流媒体、社交媒体、游戏服务 5 个行业场景，并将行业特征接入 LLM 提示词。
 - 质量评估已从随机评分升级为基于生成记录的格式、业务匹配和多样性评分；`QualityScore` 含各维度 **扣分说明列表**，`complete_session` 将完整 `quality` 以 JSON 写入 `quality_detail`，历史任务详情与导出的 **JSON** `metadata.quality` 一致。
-- 数据导出已扩展：与 CSV 同目录写入 `metadata + records` 结构的 JSON；下载接口支持 `?format=json`；前端提供 CSV / JSON 分链接。
-- 已在 **Chrome 远程调试（9222）+ DevTools MCP** 下按 Skill 跑通 `quick + 2` 全链路：结果区与历史表 **CSV | JSON**、`generate/stream` 与 `history` 200、控制台无 error 级问题。
+- 数据导出已扩展：与 CSV 同目录写入 `metadata + records` 结构的 **JSON** 与表格式 **Parquet**（`write_traffic_parquet`）；下载支持 `?format=json` 与 `?format=parquet`（`application/vnd.apache.parquet`）；前端提供 **CSV | JSON | Parquet** 分链接。
+- 已在 **Chrome 远程调试（9222）+ DevTools MCP** 下按 Skill 跑通 `quick + 2` 全链路：结果区与历史表多格式下载、`generate/stream` 与 `history` 200、控制台无 error 级问题（后续迭代在 UI 出现 Parquet 后复验一次含 Parquet 链接）。
 - 已沉淀项目 Cursor Rule 和 `traffic-agent-iteration-validation` Skill，用于后续迭代的测试、全链路验证和提交前路线图同步。
 - 已使用 Chrome DevTools MCP 多次完成 `quick + 2 条` 的本地全链路验证。
 
@@ -31,7 +31,7 @@
 
 ### 下一步建议
 
-1. 考虑 **Parquet 或报表类导出**、**批量生成** 中的一项，视数据量与产品优先级。
+1. 考虑 **报表类导出**、**批量生成** 中的一项，视数据量与产品优先级。
 2. **响应式布局优化** 按移动端使用频率排期。
 
 ## 一、全局追踪与监控
@@ -613,11 +613,12 @@ class EnhancedQualityEvaluator:
 ### 3.3 数据导出格式扩展
 
 **优先级**: 🟡 中
-**状态**: ✅ 已完成 JSON（CSV 仍保留；`GET /download/{session_id}?format=json`）
+**状态**: ✅ 已完成 JSON + Parquet（CSV 仍保留；`GET /download/{session_id}?format=json|parquet`）
 
 #### 当前格式
 - CSV（与任务 `file_path` 一致）
 - JSON（同会话侧车文件，含 `metadata` 与 `records` 数组）
+- Parquet（同会话目录 `traffic_{industry}_{session_id}.parquet`，列与 CSV 对齐；需依赖 `pyarrow`）
 
 #### 建议新增
 
@@ -634,7 +635,7 @@ class EnhancedQualityEvaluator:
    }
    ```
 
-2. **Parquet 格式**
+2. **Parquet 格式**（✅ 已实现，依赖 `pyarrow`）
    - 更好的性能
    - 支持压缩
    - 适合大数据分析
@@ -789,7 +790,7 @@ export interface BatchTaskStatus {
 
 ### 第三阶段（2周）
 
-- [x] 数据导出格式扩展（JSON + 下载参数）
+- [x] 数据导出格式扩展（JSON + Parquet + 下载参数）
 - [ ] 批量生成功能
 - [ ] 前端性能优化
 - [ ] 后端性能优化
