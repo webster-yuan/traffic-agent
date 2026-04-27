@@ -17,7 +17,7 @@ from app.models.schemas import (
     TrafficGenerateResponse,
 )
 from app.graph.workflow import get_traffic_graph
-from app.services.generator import write_csv, write_traffic_json
+from app.services.generator import write_csv, write_traffic_json, write_traffic_parquet
 from app.services.graph_runner import build_initial_state, run_generation_graph
 from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
@@ -77,6 +77,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             quality=quality,
             stage=payload.stage,
         )
+        write_traffic_parquet(session_id, records, payload.industry)
         complete_session(
             session_id=session_id,
             scenario=scenario,
@@ -260,6 +261,8 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 stage=payload.stage,
             )
             logger.info(f"session_id={session_id} JSON 文件写入完成")
+            write_traffic_parquet(session_id, records, payload.industry)
+            logger.info(f"session_id={session_id} Parquet 文件写入完成")
             
             # 创建会话记录
             logger.info(f"session_id={session_id} 创建会话记录")
@@ -300,7 +303,7 @@ async def cancel_generate(session_id: str) -> dict[str, str | bool]:
 @router.get("/download/{session_id}")
 async def download_traffic(
     session_id: str,
-    file_format: Literal["csv", "json"] = Query("csv", alias="format"),
+    file_format: Literal["csv", "json", "parquet"] = Query("csv", alias="format"),
 ) -> FileResponse:
     file_path = get_session_file(session_id)
     if not file_path:
@@ -319,6 +322,18 @@ async def download_traffic(
             path=path,
             filename=path.name,
             media_type="application/json",
+        )
+    if file_format == "parquet":
+        path = path.with_suffix(".parquet")
+        if not path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Parquet 文件不存在，该任务可能为旧数据或需重新生成",
+            )
+        return FileResponse(
+            path=path,
+            filename=path.name,
+            media_type="application/vnd.apache.parquet",
         )
     return FileResponse(path=path, filename=path.name, media_type="text/csv")
 

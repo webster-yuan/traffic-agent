@@ -12,3 +12,4 @@ langgraph-cli[inmem]
 langgraph-checkpoint-sqlite==3.0.3
 aiosqlite==0.22.1
 langsmith==0.7.33
+pyarrow>=22.0.0

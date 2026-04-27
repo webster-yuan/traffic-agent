@@ -562,3 +562,61 @@ def write_traffic_json(
     with file_path.open("w", encoding="utf-8") as f:
         json.dump(body, f, ensure_ascii=False, indent=2)
     return str(file_path)
+
+
+def write_traffic_parquet(session_id: str, records: list[TrafficRecord], industry: str) -> str:
+    """Columnar Parquet for analytics (same row semantics as CSV: JSON fields as text)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    output_dir = Path(settings.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = output_dir / f"traffic_{industry}_{session_id}.parquet"
+
+    def row_dict(r: TrafficRecord) -> dict[str, object]:
+        return {
+            "id": r.id,
+            "method": r.method,
+            "url": r.url,
+            "status_code": r.status_code,
+            "timestamp": r.timestamp.isoformat(),
+            "src_ip": r.src_ip,
+            "src_port": r.src_port,
+            "dst_ip": r.dst_ip,
+            "dst_port": r.dst_port,
+            "header": json.dumps(r.header, ensure_ascii=False),
+            "req_body": json.dumps(r.req_body, ensure_ascii=False) if r.req_body else "",
+            "resp_body": json.dumps(r.resp_body, ensure_ascii=False) if r.resp_body else "",
+            "rtt": r.rtt,
+            "duration": r.duration,
+            "user_agent": r.user_agent or "",
+            "referer": r.referer or "",
+            "identity_label": r.identity_label,
+        }
+
+    _schema = pa.schema(
+        [
+            ("id", pa.string()),
+            ("method", pa.string()),
+            ("url", pa.string()),
+            ("status_code", pa.int32()),
+            ("timestamp", pa.string()),
+            ("src_ip", pa.string()),
+            ("src_port", pa.int32()),
+            ("dst_ip", pa.string()),
+            ("dst_port", pa.int32()),
+            ("header", pa.string()),
+            ("req_body", pa.string()),
+            ("resp_body", pa.string()),
+            ("rtt", pa.float64()),
+            ("duration", pa.float64()),
+            ("user_agent", pa.string()),
+            ("referer", pa.string()),
+            ("identity_label", pa.string()),
+        ]
+    )
+    rows_py = [row_dict(r) for r in records]
+    table = pa.Table.from_pylist(rows_py, schema=_schema)
+
+    pq.write_table(table, file_path, compression="snappy")
+    return str(file_path)
