@@ -251,7 +251,7 @@ export const useTrafficStore = defineStore('traffic', {
       await deleteHistory(sessionId)
       await this.refreshHistory()
     },
-    fileUrl(sessionId: string, format: 'csv' | 'json' = 'csv') {
+    fileUrl(sessionId: string, format: 'csv' | 'json' | 'parquet' = 'csv') {
       return downloadUrl(sessionId, format)
     },
     traceUrl(sessionId: string) {

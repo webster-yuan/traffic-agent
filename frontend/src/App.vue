@@ -136,6 +136,8 @@ onMounted(async () => {
         <a :href="store.fileUrl(store.sessionId, 'csv')" target="_blank" rel="noreferrer">CSV</a>
         <span class="download-sep">|</span>
         <a :href="store.fileUrl(store.sessionId, 'json')" target="_blank" rel="noreferrer">JSON</a>
+        <span class="download-sep">|</span>
+        <a :href="store.fileUrl(store.sessionId, 'parquet')" target="_blank" rel="noreferrer">Parquet</a>
         <span class="meta-inline">{{ store.downloadPath }}</span>
       </p>
       <p v-else class="result">{{ store.resultMessage }}</p>
@@ -215,6 +217,8 @@ onMounted(async () => {
               <a :href="store.fileUrl(item.session_id, 'csv')" target="_blank" rel="noreferrer">CSV</a>
               <span class="download-sep">|</span>
               <a :href="store.fileUrl(item.session_id, 'json')" target="_blank" rel="noreferrer">JSON</a>
+              <span class="download-sep">|</span>
+              <a :href="store.fileUrl(item.session_id, 'parquet')" target="_blank" rel="noreferrer">Parquet</a>
               <button class="danger ghost" @click="store.removeHistory(item.session_id)">删除</button>
             </td>
           </tr>

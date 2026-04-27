@@ -220,9 +220,11 @@ export function generateTrafficStream(
   })
 }
 
-export function downloadUrl(sessionId: string, format: 'csv' | 'json' = 'csv') {
+export function downloadUrl(sessionId: string, format: 'csv' | 'json' | 'parquet' = 'csv') {
   const base = `${API_BASE}/download/${sessionId}`
-  return format === 'json' ? `${base}?format=json` : base
+  if (format === 'json') return `${base}?format=json`
+  if (format === 'parquet') return `${base}?format=parquet`
+  return base
 }
 
 export function langsmithTraceUrl(sessionId: string) {
