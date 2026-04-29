@@ -227,6 +227,10 @@ export function downloadUrl(sessionId: string, format: 'csv' | 'json' | 'parquet
   return base
 }
 
+export function reportUrl(sessionId: string) {
+  return `${API_BASE}/report/${sessionId}`
+}
+
 export function langsmithTraceUrl(sessionId: string) {
   if (!LANGSMITH_PROJECT_URL) return ''
   const url = new URL(LANGSMITH_PROJECT_URL)

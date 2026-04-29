@@ -36,6 +36,7 @@ from app.services.session_service import (
     update_batch_task_status,
     update_status,
 )
+from app.services.report_service import generate_report_html
 from app.core.state import add_cancelled, is_cancelled, remove_cancelled
 
 router = APIRouter(prefix="/api/v1/traffic", tags=["traffic"])
@@ -493,3 +494,14 @@ async def get_batch_status(batch_id: str) -> BatchStatusResponse:
         )
 
     return BatchStatusResponse(batch_id=batch_id, tasks=tasks, finished=all_done)
+
+
+@router.get("/report/{session_id}")
+async def get_report(session_id: str):
+    """Return an HTML report for a completed session."""
+    from fastapi.responses import HTMLResponse
+
+    html = generate_report_html(session_id)
+    if html is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return HTMLResponse(content=html, status_code=200)

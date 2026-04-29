@@ -382,6 +382,11 @@ onMounted(async () => {
         <p v-else class="meta">
           如需一键跳转，请配置前端环境变量 VITE_LANGSMITH_PROJECT_URL。
         </p>
+        <p class="result">
+          <a :href="store.reportUrl(selectedTask.session_id)" target="_blank" rel="noreferrer">
+            📊 导出 HTML 报告
+          </a>
+        </p>
       </div>
     </section>
   </main>

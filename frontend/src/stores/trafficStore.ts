@@ -7,6 +7,7 @@ import {
   getBatchStatus,
   langsmithTraceUrl,
   listHistory,
+  reportUrl,
   startBatch,
   type BatchTaskItem,
   type BatchTaskStatus,
@@ -264,6 +265,9 @@ export const useTrafficStore = defineStore('traffic', {
     },
     traceUrl(sessionId: string) {
       return langsmithTraceUrl(sessionId)
+    },
+    reportUrl(sessionId: string) {
+      return reportUrl(sessionId)
     },
     // ---- batch actions ----
     async startBatchGenerate(tasks: BatchTaskItem[]) {

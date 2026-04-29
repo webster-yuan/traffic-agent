@@ -1,7 +1,7 @@
 # Traffic Agent 待办事项与路线图
 
 **更新日期**: 2026-04-29
-**重点**: 批量生成已完成；下一优先项为 前端/后端性能优化 或 报表导出
+**重点**: 批量生成、HTML 报表导出已完成；下一优先项为 前端/后端性能优化
 
 ---
 
@@ -644,8 +644,8 @@ class EnhancedQualityEvaluator:
    - 用于旧系统兼容
 
 4. **汇总报表**
-   - PDF/HTML 格式
-   - 包含图表和统计
+   - ✅ HTML 格式（含评分柱状图、身份分布、HTTP方法/状态码统计、样本记录表）
+   - PDF 格式（通过浏览器打印 HTML 报表为 PDF）
 
 ```typescript
 // frontend/src/api/exportApi.ts
@@ -751,6 +751,7 @@ export async function exportData(
 
 - [x] 数据导出格式扩展（JSON + Parquet + 下载参数）
 - [x] 批量生成功能
+- [x] HTML 报表导出（含图表和统计）
 - [ ] 前端性能优化
 - [ ] 后端性能优化
 
