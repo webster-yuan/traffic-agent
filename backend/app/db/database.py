@@ -58,4 +58,29 @@ def init_db() -> None:
         for column, definition in _SESSION_COLUMNS.items():
             if column not in existing_columns:
                 conn.execute(f"ALTER TABLE traffic_sessions ADD COLUMN {column} {definition}")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS batch_sessions (
+                batch_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS batch_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id TEXT NOT NULL,
+                task_index INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                industry TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (batch_id) REFERENCES batch_sessions(batch_id)
+            )
+            """
+        )
         conn.commit()

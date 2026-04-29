@@ -226,3 +226,77 @@ def delete_session(session_id: str) -> None:
     with get_connection() as conn:
         conn.execute("DELETE FROM traffic_sessions WHERE id = ?", (session_id,))
         conn.commit()
+
+
+def create_batch(batch_id: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO batch_sessions (batch_id, created_at) VALUES (?, ?)",
+            (batch_id, now),
+        )
+        conn.commit()
+
+
+def add_batch_task(
+    batch_id: str,
+    task_index: int,
+    session_id: str,
+    industry: str,
+    stage: str,
+    count: int,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO batch_tasks (
+                batch_id, task_index, session_id, industry, stage, count,
+                status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (batch_id, task_index, session_id, industry, stage, count, now),
+        )
+        conn.commit()
+
+
+def update_batch_task_status(
+    batch_id: str,
+    task_index: int,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    with get_connection() as conn:
+        if error_message:
+            conn.execute(
+                """
+                UPDATE batch_tasks
+                SET status = ?, error_message = ?
+                WHERE batch_id = ? AND task_index = ?
+                """,
+                (status, error_message, batch_id, task_index),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE batch_tasks
+                SET status = ?
+                WHERE batch_id = ? AND task_index = ?
+                """,
+                (status, batch_id, task_index),
+            )
+        conn.commit()
+
+
+def get_batch_tasks(batch_id: str) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT task_index, session_id, industry, stage, count, status, error_message
+            FROM batch_tasks
+            WHERE batch_id = ?
+            ORDER BY task_index
+            """,
+            (batch_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]

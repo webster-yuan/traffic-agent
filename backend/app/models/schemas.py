@@ -81,3 +81,30 @@ class SessionSummary(BaseModel):
     completed_at: str | None = None
     created_at: str
     updated_at: str | None = None
+
+
+class BatchTaskItem(BaseModel):
+    industry: str = Field(..., min_length=1, max_length=64)
+    count: int = Field(default=100, ge=1, le=10000)
+    stage: Stage = Field(default=Stage.standard)
+
+
+class BatchGenerateRequest(BaseModel):
+    tasks: list[BatchTaskItem] = Field(..., min_length=1, max_length=10)
+
+
+class BatchTaskStatus(BaseModel):
+    index: int
+    industry: str
+    stage: Stage
+    count: int
+    session_id: str
+    status: SessionStatus
+    progress: int
+    error_message: str | None = None
+
+
+class BatchStatusResponse(BaseModel):
+    batch_id: str
+    tasks: list[BatchTaskStatus]
+    finished: bool

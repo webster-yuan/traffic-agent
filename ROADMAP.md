@@ -1,7 +1,7 @@
 # Traffic Agent 待办事项与路线图
 
-**更新日期**: 2026-04-26
-**重点**: 质量详情与 Parquet 导出已就绪；下一优先项为 报表/批量生成/响应式 中按产品排序择一
+**更新日期**: 2026-04-29
+**重点**: 批量生成已完成；下一优先项为 前端/后端性能优化 或 报表导出
 
 ---
 
@@ -668,56 +668,15 @@ export async function exportData(
 ### 3.4 批量生成功能
 
 **优先级**: 🟢 低
-**状态**: ⏳ 待做
+**状态**: ✅ 已完成（支持最多 10 个任务、独立会话、进度轮询、异步执行）
 
-#### 功能描述
-- 用户可以一次创建多个生成任务
-- 设置相同的参数或不同参数的批量
+#### 实现说明
 
-```typescript
-// frontend/src/types/generate.ts
-export interface BatchGenerateRequest {
-  tasks: Array<{
-    industry: string
-    count: number
-    stage: Stage
-    priority: 'low' | 'normal' | 'high'
-  }>
-}
-
-export interface BatchTaskStatus {
-  taskId: string
-  sessionId: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  progress: number
-  createdAt: number
-}
-```
-
-```vue
-<!-- frontend/src/components/BatchGenerate.vue -->
-<template>
-  <div class="batch-panel">
-    <div class="batch-list">
-      <div v-for="task in tasks" :key="task.id" class="task-item">
-        <div class="task-info">
-          <span class="task-industry">{{ task.industry }}</span>
-          <span class="task-count">{{ task.count }} 条</span>
-          <span class="task-priority">{{ task.priority }}</span>
-        </div>
-        <div class="task-status">
-          <span v-if="task.status === 'running'">⏳ 进行中</span>
-          <span v-else-if="task.status === 'completed'">✅ 完成</span>
-          <span v-else-if="task.status === 'failed'">❌ 失败</span>
-        </div>
-      </div>
-    </div>
-    <button @click="startBatch" class="batch-btn">
-      {{ isRunning ? '批量生成中...' : '开始批量生成' }}
-    </button>
-  </div>
-</template>
-```
+- **后端**: `POST /api/v1/traffic/batch` 接受任务列表，`GET /api/v1/traffic/batch/{batch_id}` 查询进度
+- **数据库**: 新增 `batch_sessions` 和 `batch_tasks` 表
+- **前端**: 批量面板支持添加/移除任务，实时进度展示，2 秒轮询刷新
+- **执行**: 使用 `asyncio.create_task` 异步执行，每个任务独立获取信号量
+- **测试**: `tests/test_batch.py` 包含 6 个单元测试，全链路 Chrome 验证通过
 
 ---
 
@@ -791,7 +750,7 @@ export interface BatchTaskStatus {
 ### 第三阶段（2周）
 
 - [x] 数据导出格式扩展（JSON + Parquet + 下载参数）
-- [ ] 批量生成功能
+- [x] 批量生成功能
 - [ ] 前端性能优化
 - [ ] 后端性能优化
 

@@ -12,21 +12,28 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.models.schemas import (
+    BatchGenerateRequest,
+    BatchStatusResponse,
+    BatchTaskStatus,
     SessionStatus,
     TrafficGenerateRequest,
     TrafficGenerateResponse,
 )
 from app.graph.workflow import get_traffic_graph
 from app.services.generator import write_csv, write_traffic_json, write_traffic_parquet
-from app.services.graph_runner import build_initial_state, run_generation_graph
+from app.services.graph_runner import build_initial_state, run_generation_graph, run_generation_graph_async
 from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
+    add_batch_task,
     complete_session,
+    create_batch,
     create_session,
     delete_session,
     fail_session,
+    get_batch_tasks,
     get_session_file,
     list_history,
+    update_batch_task_status,
     update_status,
 )
 from app.core.state import add_cancelled, is_cancelled, remove_cancelled
@@ -363,3 +370,126 @@ async def remove_history(session_id: str) -> dict[str, str | bool]:
             file.unlink()
     delete_session(session_id)
     return {"success": True, "session_id": session_id, "message": "删除成功"}
+
+
+async def _run_single_task(
+    batch_id: str,
+    task_index: int,
+    session_id: str,
+    industry: str,
+    stage: str,
+    count: int,
+) -> None:
+    """Run a single generation task as part of a batch."""
+    await _acquire()
+    try:
+        from app.models.schemas import Stage
+
+        payload = TrafficGenerateRequest(
+            industry=industry,
+            count=count,
+            stage=Stage(stage),
+        )
+        graph_config = build_graph_config(session_id=session_id, payload=payload)
+        create_session(
+            session_id=session_id,
+            industry=industry,
+            scenario="",
+            stage=Stage(stage),
+            status=SessionStatus.processing,
+            requested_count=count,
+            record_count=0,
+            quality_score=None,
+            file_path=None,
+            trace_thread_id=graph_config["configurable"]["thread_id"],
+            trace_metadata=graph_config["metadata"],
+        )
+        update_batch_task_status(batch_id, task_index, "processing")
+
+        graph_result = await run_generation_graph_async(session_id=session_id, payload=payload)
+        scenario = graph_result["scenario"]
+        quality = graph_result["quality_score"]
+        records = graph_result["generated_records"]
+        file_path = write_csv(session_id, records, industry)
+        write_traffic_json(
+            session_id, records, industry,
+            scenario=scenario, quality=quality, stage=Stage(stage),
+        )
+        write_traffic_parquet(session_id, records, industry)
+        complete_session(
+            session_id=session_id,
+            scenario=scenario,
+            record_count=len(records),
+            file_path=file_path,
+            quality=quality,
+        )
+        update_batch_task_status(batch_id, task_index, "completed")
+    except Exception as e:
+        fail_session(session_id, str(e))
+        update_batch_task_status(batch_id, task_index, "failed", str(e))
+    finally:
+        _release()
+
+
+@router.post("/batch")
+async def start_batch(payload: BatchGenerateRequest) -> dict:
+    batch_id = uuid.uuid4().hex[:8]
+    create_batch(batch_id)
+
+    session_ids: list[str] = [uuid.uuid4().hex[:12] for _ in payload.tasks]
+
+    for idx, task in enumerate(payload.tasks):
+        add_batch_task(
+            batch_id=batch_id,
+            task_index=idx,
+            session_id=session_ids[idx],
+            industry=task.industry,
+            stage=task.stage.value,
+            count=task.count,
+        )
+
+    for idx, task in enumerate(payload.tasks):
+        asyncio.create_task(
+            _run_single_task(
+                batch_id=batch_id,
+                task_index=idx,
+                session_id=session_ids[idx],
+                industry=task.industry,
+                stage=task.stage.value,
+                count=task.count,
+            )
+        )
+
+    return {"success": True, "batch_id": batch_id}
+
+
+@router.get("/batch/{batch_id}", response_model=BatchStatusResponse)
+async def get_batch_status(batch_id: str) -> BatchStatusResponse:
+    tasks_rows = get_batch_tasks(batch_id)
+    if not tasks_rows:
+        raise HTTPException(status_code=404, detail="批次不存在")
+
+    tasks = []
+    all_done = True
+    for row in tasks_rows:
+        status = SessionStatus(row["status"])
+        if status not in (SessionStatus.completed, SessionStatus.failed, SessionStatus.cancelled):
+            all_done = False
+        progress = 100 if status == SessionStatus.completed else (50 if status == SessionStatus.processing else 0)
+
+        from app.models.schemas import Stage as StageEnum
+
+        tasks.append(
+            BatchTaskStatus(
+                index=row["task_index"],
+                industry=row["industry"],
+                stage=StageEnum(row["stage"]),
+                count=row["count"],
+                session_id=row["session_id"],
+                status=status,
+                progress=progress,
+                error_message=row.get("error_message"),
+            )
+        )
+
+    return BatchStatusResponse(batch_id=batch_id, tasks=tasks, finished=all_done)

@@ -4,8 +4,12 @@ import {
   deleteHistory,
   downloadUrl,
   generateTrafficStream,
+  getBatchStatus,
   langsmithTraceUrl,
   listHistory,
+  startBatch,
+  type BatchTaskItem,
+  type BatchTaskStatus,
   type GeneratePayload,
   type HistoryItem,
   type StageComplete,
@@ -100,6 +104,10 @@ export const useTrafficStore = defineStore('traffic', {
     history: [] as HistoryItem[],
     historyFilters: createHistoryFilters(),
     abortController: null as AbortController | null,
+    // batch state
+    batchId: '',
+    batchTasks: [] as BatchTaskStatus[],
+    batchRunning: false,
   }),
   getters: {
     filteredHistory(state) {
@@ -256,6 +264,43 @@ export const useTrafficStore = defineStore('traffic', {
     },
     traceUrl(sessionId: string) {
       return langsmithTraceUrl(sessionId)
+    },
+    // ---- batch actions ----
+    async startBatchGenerate(tasks: BatchTaskItem[]) {
+      this.batchRunning = true
+      this.batchTasks = tasks.map((t, i) => ({
+        index: i,
+        industry: t.industry,
+        stage: t.stage,
+        count: t.count,
+        session_id: '',
+        status: 'pending',
+        progress: 0,
+        error_message: null,
+      }))
+      const result = await startBatch(tasks)
+      this.batchId = result.batch_id
+      this._pollBatch()
+    },
+    async _pollBatch() {
+      if (!this.batchId || !this.batchRunning) return
+      try {
+        const status = await getBatchStatus(this.batchId)
+        this.batchTasks = status.tasks
+        if (status.finished) {
+          this.batchRunning = false
+          await this.refreshHistory()
+        } else {
+          setTimeout(() => this._pollBatch(), 2000)
+        }
+      } catch {
+        this.batchRunning = false
+      }
+    },
+    resetBatch() {
+      this.batchId = ''
+      this.batchTasks = []
+      this.batchRunning = false
     },
   },
 })

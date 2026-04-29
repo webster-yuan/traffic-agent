@@ -37,3 +37,14 @@ def run_generation_graph(session_id: str, payload: TrafficGenerateRequest) -> di
         config=build_graph_config(session_id=session_id, payload=payload),
     )
     return result
+
+
+async def run_generation_graph_async(session_id: str, payload: TrafficGenerateRequest) -> dict:
+    """Async version for use within asyncio tasks (batch generation)."""
+    graph = get_traffic_graph()
+    state = build_initial_state(session_id, payload)
+    result = await graph.ainvoke(
+        state,
+        config=build_graph_config(session_id=session_id, payload=payload),
+    )
+    return result

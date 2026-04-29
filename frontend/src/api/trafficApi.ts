@@ -233,3 +233,48 @@ export function langsmithTraceUrl(sessionId: string) {
   url.searchParams.set('search', `metadata.session_id:${sessionId}`)
   return url.toString()
 }
+
+// ---- Batch types and API ----
+
+export interface BatchTaskItem {
+  industry: string
+  count: number
+  stage: Stage
+}
+
+export interface BatchTaskStatus {
+  index: number
+  industry: string
+  stage: Stage
+  count: number
+  session_id: string
+  status: string
+  progress: number
+  error_message: string | null
+}
+
+export interface BatchStatusResponse {
+  batch_id: string
+  tasks: BatchTaskStatus[]
+  finished: boolean
+}
+
+export async function startBatch(tasks: BatchTaskItem[]) {
+  const res = await fetch(`${API_BASE}/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tasks }),
+  })
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json() as Promise<{ success: boolean; batch_id: string }>
+}
+
+export async function getBatchStatus(batchId: string) {
+  const res = await fetch(`${API_BASE}/batch/${batchId}`)
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json() as Promise<BatchStatusResponse>
+}
