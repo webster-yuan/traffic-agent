@@ -71,8 +71,32 @@ export async function generateTraffic(payload: GeneratePayload) {
   return res.json()
 }
 
-export async function listHistory(page = 1, pageSize = 20) {
-  const res = await fetch(`${API_BASE}/history?page=${page}&page_size=${pageSize}`)
+export interface HistoryFilters {
+  keyword: string
+  industry: string
+  stage: string
+  status: string
+  dateFrom: string
+  dateTo: string
+  minQuality: string
+}
+
+export async function listHistory(page = 1, pageSize = 20, filters?: Partial<HistoryFilters>) {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('page_size', String(pageSize))
+
+  if (filters) {
+    if (filters.keyword) params.set('keyword', filters.keyword)
+    if (filters.industry) params.set('industry', filters.industry)
+    if (filters.stage) params.set('stage', filters.stage)
+    if (filters.status) params.set('status', filters.status)
+    if (filters.dateFrom) params.set('date_from', filters.dateFrom)
+    if (filters.dateTo) params.set('date_to', filters.dateTo)
+    if (filters.minQuality) params.set('min_quality', filters.minQuality)
+  }
+
+  const res = await fetch(`${API_BASE}/history?${params.toString()}`)
   if (!res.ok) {
     throw new Error(await responseErrorMessage(res))
   }

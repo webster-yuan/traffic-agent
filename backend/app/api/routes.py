@@ -350,8 +350,24 @@ async def download_traffic(
 async def get_history(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    keyword: str | None = Query(default=None, description="搜索关键字 (session_id/行业/场景/错误)"),
+    industry: str | None = Query(default=None, description="行业过滤"),
+    stage: str | None = Query(default=None, description="阶段过滤 (quick/standard/full)"),
+    status: str | None = Query(default=None, description="状态过滤 (completed/failed/cancelled)"),
+    date_from: str | None = Query(default=None, description="起始日期 (YYYY-MM-DD)"),
+    date_to: str | None = Query(default=None, description="结束日期 (YYYY-MM-DD)"),
+    min_quality: float | None = Query(default=None, ge=0, le=100, description="最低评分 (0-100)"),
 ) -> dict:
-    total, items = list_history(page, page_size)
+    total, items = list_history(
+        page, page_size,
+        keyword=keyword,
+        industry=industry,
+        stage=stage,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        min_quality=min_quality,
+    )
     total_pages = (total + page_size - 1) // page_size
     return {
         "total": total,

@@ -14,6 +14,10 @@ function selectTask(sessionId: string) {
   selectedSessionId.value = selectedSessionId.value === sessionId ? '' : sessionId
 }
 
+function onFilterChange() {
+  store.refreshHistory(1)
+}
+
 onMounted(async () => {
   await store.refreshHistory()
 })
@@ -25,11 +29,11 @@ onMounted(async () => {
     <div class="history-filter">
       <label>
         关键字
-        <input v-model="store.historyFilters.keyword" type="search" placeholder="Session / 场景 / 错误" />
+        <input v-model="store.historyFilters.keyword" type="search" placeholder="Session / 场景 / 错误" @change="onFilterChange" />
       </label>
       <label>
         行业
-        <select v-model="store.historyFilters.industry">
+        <select v-model="store.historyFilters.industry" @change="onFilterChange">
           <option value="">全部行业</option>
           <option v-for="item in industryOptions" :key="item.value" :value="item.value">
             {{ item.label }}
@@ -38,7 +42,7 @@ onMounted(async () => {
       </label>
       <label>
         阶段
-        <select v-model="store.historyFilters.stage">
+        <select v-model="store.historyFilters.stage" @change="onFilterChange">
           <option value="">全部阶段</option>
           <option value="quick">快速</option>
           <option value="standard">标准</option>
@@ -47,7 +51,7 @@ onMounted(async () => {
       </label>
       <label>
         状态
-        <select v-model="store.historyFilters.status">
+        <select v-model="store.historyFilters.status" @change="onFilterChange">
           <option value="">全部状态</option>
           <option v-for="item in statusOptions" :key="item.value" :value="item.value">
             {{ item.label }}
@@ -56,19 +60,19 @@ onMounted(async () => {
       </label>
       <label>
         开始日期
-        <input v-model="store.historyFilters.dateFrom" type="date" />
+        <input v-model="store.historyFilters.dateFrom" type="date" @change="onFilterChange" />
       </label>
       <label>
         结束日期
-        <input v-model="store.historyFilters.dateTo" type="date" />
+        <input v-model="store.historyFilters.dateTo" type="date" @change="onFilterChange" />
       </label>
       <label>
         最低评分
-        <input v-model="store.historyFilters.minQuality" type="number" min="0" max="100" placeholder="如 80" />
+        <input v-model="store.historyFilters.minQuality" type="number" min="0" max="100" placeholder="如 80" @change="onFilterChange" />
       </label>
       <button class="ghost neutral" @click="store.resetHistoryFilters">重置筛选</button>
     </div>
-    <p class="meta">已显示 {{ store.filteredHistory.length }} / {{ store.history.length }} 条历史记录 · 第 {{ store.historyPage }} / {{ store.historyTotalPages }} 页</p>
+    <p class="meta">共 {{ store.historyTotal }} 条 · 第 {{ store.historyPage }} / {{ store.historyTotalPages }} 页</p>
     <div v-if="store.historyTotalPages > 1" class="pagination">
       <button :disabled="store.historyPage <= 1" @click="store.goHistoryPage(store.historyPage - 1)">
         ← 上一页
@@ -91,7 +95,7 @@ onMounted(async () => {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="item in store.filteredHistory" :key="item.session_id">
+        <tr v-for="item in store.history" :key="item.session_id">
           <td>{{ item.session_id }}</td>
           <td>{{ item.industry }}</td>
           <td>{{ item.stage }}</td>
@@ -108,7 +112,7 @@ onMounted(async () => {
             <button class="danger ghost" @click="store.removeHistory(item.session_id)">删除</button>
           </td>
         </tr>
-        <tr v-if="store.filteredHistory.length === 0">
+        <tr v-if="store.history.length === 0">
           <td colspan="7">暂无匹配记录</td>
         </tr>
       </tbody>

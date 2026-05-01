@@ -151,6 +151,97 @@ class TestRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(resp.headers.get("content-type", ""), ("application/vnd.apache.parquet",))
 
+    def test_history_filtering_by_industry(self) -> None:
+        """历史端点按行业筛选"""
+        from app.models.schemas import SessionSummary, SessionStatus, Stage
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        mock_items = [
+            SessionSummary(
+                session_id="s1",
+                industry="ecommerce",
+                scenario="全天候配送",
+                stage=Stage.standard,
+                status=SessionStatus.completed,
+                requested_count=3,
+                record_count=3,
+                quality_score=85.0,
+                quality_detail=None,
+                trace_thread_id=None,
+                error_message=None,
+                started_at=now,
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+        with patch("app.api.routes.list_history", return_value=(1, mock_items)):
+            resp = self.client.get(
+                "/api/v1/traffic/history?page=1&page_size=20&industry=ecommerce"
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["industry"], "ecommerce")
+
+    def test_history_filtering_by_status(self) -> None:
+        """历史端点按状态筛选"""
+        from app.models.schemas import SessionSummary, SessionStatus, Stage
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        mock_items = [
+            SessionSummary(
+                session_id="s2",
+                industry="ride_hailing",
+                scenario="通勤高峰",
+                stage=Stage.quick,
+                status=SessionStatus.failed,
+                requested_count=5,
+                record_count=0,
+                quality_score=None,
+                quality_detail=None,
+                trace_thread_id=None,
+                error_message="LLM timeout",
+                started_at=now,
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+        with patch("app.api.routes.list_history", return_value=(1, mock_items)):
+            resp = self.client.get(
+                "/api/v1/traffic/history?page=1&page_size=20&status=failed"
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["status"], "failed")
+
+    def test_history_filtering_combined(self) -> None:
+        """历史端点组合筛选"""
+        with patch("app.api.routes.list_history", return_value=(0, [])) as mock_fn:
+            resp = self.client.get(
+                "/api/v1/traffic/history?page=1&page_size=10&keyword=test&min_quality=70&date_from=2026-01-01"
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 0)
+        self.assertEqual(len(data["items"]), 0)
+        # 验证参数正确传递
+        mock_fn.assert_called_once_with(
+            1, 10,
+            keyword="test",
+            industry=None,
+            stage=None,
+            status=None,
+            date_from="2026-01-01",
+            date_to=None,
+            min_quality=70.0,
+        )
+
     def test_download_parquet_404(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             csv_p = Path(d) / "traffic_x_abc123.csv"

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import type { HistoryItem } from "../api/trafficApi";
+import type { HistoryFilters, HistoryItem } from "../api/trafficApi";
 
 vi.mock("../api/trafficApi", () => ({
   generateTrafficStream: vi.fn(),
@@ -106,27 +106,71 @@ describe("trafficStore", () => {
     expect(store.progress).toBe(100);
   });
 
-  it("filteredHistory should apply history filters", () => {
-    const store = useTrafficStore();
-    store.history = [
-      historyItem({ session_id: "ride_ok", industry: "ride_hailing", quality_score: 91 }),
-      historyItem({
-        session_id: "delivery_failed",
-        industry: "delivery",
-        status: "failed",
-        quality_score: null,
-        error_message: "LLM failed",
-      }),
-    ];
+  it("refreshHistory should pass filters to listHistory API", async () => {
+    const { listHistory } = await import("../api/trafficApi");
+    const mockedListHistory = vi.mocked(listHistory);
+    mockedListHistory.mockResolvedValue({
+      total: 1,
+      page: 1,
+      page_size: 20,
+      total_pages: 1,
+      items: [
+        historyItem({ session_id: "ride_ok", industry: "ride_hailing", quality_score: 91 }),
+      ],
+    });
 
+    const store = useTrafficStore();
     store.historyFilters.industry = "ride_hailing";
     store.historyFilters.minQuality = "90";
 
-    expect(store.filteredHistory.map((item) => item.session_id)).toEqual(["ride_ok"]);
+    await store.refreshHistory();
 
-    store.resetHistoryFilters();
+    expect(mockedListHistory).toHaveBeenCalledWith(1, 20, {
+      keyword: undefined,
+      industry: "ride_hailing",
+      stage: undefined,
+      status: undefined,
+      dateFrom: undefined,
+      dateTo: undefined,
+      minQuality: "90",
+    });
+    expect(store.history).toHaveLength(1);
+    expect(store.history[0].session_id).toBe("ride_ok");
+    expect(store.historyTotal).toBe(1);
+  });
+
+  it("resetHistoryFilters should clear filters and refresh", async () => {
+    const { listHistory } = await import("../api/trafficApi");
+    const mockedListHistory = vi.mocked(listHistory);
+    mockedListHistory.mockResolvedValue({
+      total: 2,
+      page: 1,
+      page_size: 20,
+      total_pages: 1,
+      items: [
+        historyItem({ session_id: "ride_ok", industry: "ride_hailing" }),
+        historyItem({ session_id: "delivery_failed", industry: "delivery", status: "failed" }),
+      ],
+    });
+
+    const store = useTrafficStore();
+    store.historyFilters.industry = "ride_hailing";
     store.historyFilters.keyword = "llm";
 
-    expect(store.filteredHistory.map((item) => item.session_id)).toEqual(["delivery_failed"]);
+    await store.resetHistoryFilters();
+
+    const expectedFilters: Partial<HistoryFilters> = {
+      keyword: undefined,
+      industry: undefined,
+      stage: undefined,
+      status: undefined,
+      dateFrom: undefined,
+      dateTo: undefined,
+      minQuality: undefined,
+    };
+    expect(mockedListHistory).toHaveBeenCalledWith(1, 20, expectedFilters);
+    expect(store.historyFilters.industry).toBe("");
+    expect(store.historyFilters.keyword).toBe("");
+    expect(store.history).toHaveLength(2);
   });
 });

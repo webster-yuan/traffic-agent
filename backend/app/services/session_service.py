@@ -184,21 +184,73 @@ def get_session_file(session_id: str) -> str | None:
         raise
 
 
-def list_history(page: int, page_size: int) -> tuple[int, list[SessionSummary]]:
+def list_history(
+    page: int,
+    page_size: int,
+    *,
+    keyword: str | None = None,
+    industry: str | None = None,
+    stage: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_quality: float | None = None,
+) -> tuple[int, list[SessionSummary]]:
+    conditions: list[str] = []
+    params: list[str | float] = []
+
+    if keyword:
+        kw = f"%{keyword}%"
+        conditions.append("(id LIKE ? OR industry LIKE ? OR scenario LIKE ? OR error_message LIKE ?)")
+        params.extend([kw, kw, kw, kw])
+    if industry:
+        conditions.append("industry = ?")
+        params.append(industry)
+    if stage:
+        conditions.append("stage = ?")
+        params.append(stage)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if date_from:
+        conditions.append("updated_at >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("updated_at <= ?")
+        params.append(f"{date_to}T23:59:59")
+    if min_quality is not None:
+        conditions.append("quality_score >= ?")
+        params.append(min_quality)
+
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    select_fields = """
+        id, industry, scenario, stage, status, requested_count, record_count,
+        quality_score, quality_detail, trace_thread_id, error_message, started_at, completed_at,
+        created_at, updated_at
+    """
+
     with get_connection() as conn:
-        total = conn.execute("SELECT COUNT(*) AS c FROM traffic_sessions").fetchone()["c"]
+        count_row = conn.execute(
+            f"SELECT COUNT(*) AS c FROM traffic_sessions {where_clause}",
+            params,
+        ).fetchone()
+        total = count_row["c"]
+
+        limit_offset = [page_size, (page - 1) * page_size]
         rows = conn.execute(
-            """
-            SELECT
-                id, industry, scenario, stage, status, requested_count, record_count,
-                quality_score, quality_detail, trace_thread_id, error_message, started_at, completed_at,
-                created_at, updated_at
+            f"""
+            SELECT {select_fields}
             FROM traffic_sessions
+            {where_clause}
             ORDER BY updated_at DESC, created_at DESC
             LIMIT ? OFFSET ?
             """,
-            (page_size, (page - 1) * page_size),
+            params + limit_offset,
         ).fetchall()
+
     result = [
         SessionSummary(
             session_id=row["id"],

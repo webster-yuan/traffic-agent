@@ -12,6 +12,7 @@ import {
   type BatchTaskItem,
   type BatchTaskStatus,
   type GeneratePayload,
+  type HistoryFilters,
   type HistoryItem,
   type StageComplete,
   type StageProgress,
@@ -50,16 +51,6 @@ type StageStep = {
   retry?: number
 }
 
-type HistoryFilters = {
-  keyword: string
-  industry: string
-  stage: string
-  status: string
-  dateFrom: string
-  dateTo: string
-  minQuality: string
-}
-
 const STAGE_ORDER = ['rag', 'generate', 'eval', 'identity']
 
 function createStageSteps(): StageStep[] {
@@ -83,14 +74,6 @@ function createHistoryFilters(): HistoryFilters {
   }
 }
 
-function dayStart(value: string) {
-  return new Date(`${value}T00:00:00`).getTime()
-}
-
-function dayEnd(value: string) {
-  return new Date(`${value}T23:59:59.999`).getTime()
-}
-
 export const useTrafficStore = defineStore('traffic', {
   state: () => ({
     running: false,
@@ -105,6 +88,7 @@ export const useTrafficStore = defineStore('traffic', {
     history: [] as HistoryItem[],
     historyPage: 1,
     historyTotalPages: 1,
+    historyTotal: 0,
     historyFilters: createHistoryFilters(),
     abortController: null as AbortController | null,
     // batch state
@@ -113,38 +97,6 @@ export const useTrafficStore = defineStore('traffic', {
     batchRunning: false,
   }),
   getters: {
-    filteredHistory(state) {
-      const keyword = state.historyFilters.keyword.trim().toLowerCase()
-      const minQuality = Number(state.historyFilters.minQuality)
-      const hasMinQuality = state.historyFilters.minQuality !== '' && !Number.isNaN(minQuality)
-      const fromTime = state.historyFilters.dateFrom ? dayStart(state.historyFilters.dateFrom) : null
-      const toTime = state.historyFilters.dateTo ? dayEnd(state.historyFilters.dateTo) : null
-
-      return state.history.filter((item) => {
-        if (state.historyFilters.industry && item.industry !== state.historyFilters.industry) return false
-        if (state.historyFilters.stage && item.stage !== state.historyFilters.stage) return false
-        if (state.historyFilters.status && item.status !== state.historyFilters.status) return false
-        if (hasMinQuality && (item.quality_score === null || item.quality_score < minQuality)) return false
-
-        const itemTime = new Date(item.updated_at || item.created_at).getTime()
-        if (fromTime !== null && itemTime < fromTime) return false
-        if (toTime !== null && itemTime > toTime) return false
-
-        if (keyword) {
-          const haystack = [
-            item.session_id,
-            item.industry,
-            item.scenario,
-            item.stage,
-            item.status,
-            item.error_message || '',
-          ].join(' ').toLowerCase()
-          if (!haystack.includes(keyword)) return false
-        }
-
-        return true
-      })
-    },
   },
   actions: {
     inferScenario(industry: string) {
@@ -152,10 +104,20 @@ export const useTrafficStore = defineStore('traffic', {
     },
     async refreshHistory(page?: number) {
       const p = page ?? this.historyPage
-      const data = await listHistory(p, 20)
+      const filters = this.historyFilters
+      const data = await listHistory(p, 20, {
+        keyword: filters.keyword || undefined,
+        industry: filters.industry || undefined,
+        stage: filters.stage || undefined,
+        status: filters.status || undefined,
+        dateFrom: filters.dateFrom || undefined,
+        dateTo: filters.dateTo || undefined,
+        minQuality: filters.minQuality || undefined,
+      })
       this.history = data.items
       this.historyPage = data.page
       this.historyTotalPages = data.total_pages
+      this.historyTotal = data.total
     },
     async goHistoryPage(page: number) {
       if (page < 1 || page > this.historyTotalPages) return
@@ -166,6 +128,7 @@ export const useTrafficStore = defineStore('traffic', {
     },
     resetHistoryFilters() {
       this.historyFilters = createHistoryFilters()
+      this.refreshHistory(1)
     },
     markStageStart(event: StageProgress) {
       const step = this.stageSteps.find((item) => item.stage === event.stage)
