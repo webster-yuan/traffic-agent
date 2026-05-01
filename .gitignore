@@ -58,6 +58,7 @@ coverage.xml
 *.sqlite3
 backend/data/
 !backend/data/.gitkeep
+!backend/data/examples/
 
 # LangGraph / LangSmith 本地运行产物
 backend/.langgraph_api/

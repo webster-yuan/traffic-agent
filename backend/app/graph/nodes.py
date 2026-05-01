@@ -87,7 +87,7 @@ def rag_node(state: GraphState) -> GraphState:
 
     state["scenario"] = infer_scenario(state["industry"])
     state["retrieved_cases"] = [
-        {"industry": state["industry"], "scenario": state["scenario"], "content": "mock_case"}
+        {"industry": state["industry"], "scenario": state["scenario"], "content": f"static_examples_{state['industry']}.json"}
     ]
 
     if "quality_score" not in state:

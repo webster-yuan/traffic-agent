@@ -65,23 +65,14 @@
 
 ## 二、后端问题（需修复）
 
-### 2.1 RAG 阶段仍是 Mock 🔴
+### 2.1 RAG 阶段升级 ✅（2026-04-29）
 
-**位置**: `backend/app/graph/nodes.py:84-97`
+**方案 A（静态示例）已实现**: `_get_examples(industry)` 从 `data/examples/{industry}.json` 加载行业专属示例，不存在时回退 `custom.json`。12 个行业各有 3 条示例（2 real + 1 fake），注入到 LLM system prompt 的 `参考样例` 字段。
 
-```python
-def rag_node(state: GraphState) -> GraphState:
-    state["scenario"] = infer_scenario(state["industry"])
-    state["retrieved_cases"] = [
-        {"industry": state["industry"], "scenario": state["scenario"], "content": "mock_case"}
-    ]
-```
-
-**问题**: 场景推断是硬编码字典映射，检索结果是写死的 `mock_case`。没有真正的知识库检索，无法为 LLM 提供行业相关的真实流量案例作为 few-shot。
-**影响**: LLM 生成质量依赖 prompt 中的示例（目前只有 2 条电商硬编码示例），跨行业泛化能力弱。
-**建议**: 
-- 方案 A（轻量）：为每个行业维护一个示例 JSON 文件，检索时加载。
-- 方案 B（完整）：用 Chroma/FAISS 做向量检索，把行业特征文档索引化。
+**位置**:
+- `backend/app/services/generator.py:141-149` — `_get_examples(industry)` 读 JSON
+- `backend/app/graph/nodes.py:88-91` — `rag_node` 记录示例来源
+- `backend/data/examples/` — 12 个行业 JSON 文件
 
 ### 2.2 LLM 调用未做超时/重试包装 🟡
 
@@ -180,7 +171,7 @@ response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
 - [x] 历史分页可用
 - [x] Tab 导航切换
 - [x] industry 枚举校验
-- [ ] RAG 提供真实行业示例
+- [x] RAG 提供真实行业示例
 
 ### 体验
 - [x] 流式进度 + 阶段时间线

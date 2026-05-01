@@ -14,16 +14,7 @@
 
 ## 2. 后端增强（紧随其后）
 
-### 2.1 RAG 阶段升级 🔴
-
-当前 RAG 是硬编码字典 + `mock_case`。改为加载行业示例 JSON 文件作为 few-shot 提示词，让 LLM 生成更贴合行业特征。
-
-**方案**:
-- 为每个行业维护 `data/examples/{industry}.json`，包含 3-5 条典型流量记录
-- RAG 节点读取对应文件，写入 `retrieved_cases`
-- LLM prompt 中动态注入行业示例
-
-### 2.2 异步 LLM 调用 + 超时 🟡
+### 2.1 异步 LLM 调用 + 超时 🟡
 
 `generate_records_by_llm()` 使用同步 `llm.invoke()` → 改为 `await llm.ainvoke()` + `asyncio.wait_for(timeout=...)`。当前 Ollama 本地调用不需此优化，但为未来远程 API 做准备。
 
@@ -92,3 +83,4 @@ Windows 10 + Ollama（当前）
 | threading.local() 数据库连接 | 2026-04 |
 | 定期文件清理 (30 天) | 2026-04 |
 | pytest 测试覆盖（14 个） | 2026-04 |
+| RAG 升级（12 行业静态示例 JSON） | 2026-04-29 |

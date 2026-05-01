@@ -138,47 +138,14 @@ def _random_header(is_script: bool) -> dict:
     }
 
 
-def _get_examples() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": "550e8400-e29b-41d4-a716-446655440001",
-            "method": "GET",
-            "url": "https://api.ecommerce.com/api/product/list?page=1&size=20",
-            "status_code": 200,
-            "timestamp": "2026-04-18T10:30:00+00:00",
-            "src_ip": "192.168.1.105",
-            "src_port": 54321,
-            "dst_ip": "10.0.0.10",
-            "dst_port": 443,
-            "header": {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-            "req_body": None,
-            "resp_body": {"code": 0, "message": "success", "data": {"products": []}},
-            "rtt": 125.5,
-            "duration": 180.2,
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "referer": "https://ecommerce.com/",
-            "identity_label": "real",
-        },
-        {
-            "id": "550e8400-e29b-41d4-a716-446655440002",
-            "method": "POST",
-            "url": "https://api.ecommerce.com/api/order/create",
-            "status_code": 200,
-            "timestamp": "2026-04-18T10:30:15+00:00",
-            "src_ip": "192.168.1.108",
-            "src_port": 12345,
-            "dst_ip": "10.0.0.12",
-            "dst_port": 443,
-            "header": {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "python-requests/2.28.0"},
-            "req_body": {"sku_id": "SKU12345", "quantity": 2, "user_id": 10001},
-            "resp_body": {"code": 0, "message": "order created", "order_id": "ORD20260418001"},
-            "rtt": 89.3,
-            "duration": 150.8,
-            "user_agent": "python-requests/2.28.0",
-            "referer": None,
-            "identity_label": "fake",
-        },
-    ]
+def _get_examples(industry: str) -> list[dict[str, Any]]:
+    examples_dir = Path(__file__).parent.parent.parent / "data" / "examples"
+    path = examples_dir / f"{industry}.json"
+    if not path.exists():
+        logger.warning(f"行业 {industry} 无专属示例文件, 回退到 custom.json")
+        path = examples_dir / "custom.json"
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _get_llm_timeout() -> int:
@@ -191,7 +158,7 @@ def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: s
     try:
         logger.info(f"开始调用LLM生成流量: count={count}, industry={industry}, scenario={scenario}")
 
-        examples = _get_examples()
+        examples = _get_examples(industry)
         examples_str = "\n".join([json.dumps(e, ensure_ascii=False) for e in examples])
 
         system_prompt = f"""你是网络流量数据生成助手。根据以下行业和场景信息，生成真实的流量数据。
