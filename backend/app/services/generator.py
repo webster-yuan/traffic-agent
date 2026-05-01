@@ -153,8 +153,8 @@ def _get_llm_timeout() -> int:
     return getattr(settings, "llm_timeout", 300)
 
 
-def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: str) -> list[TrafficRecord]:
-    """生成流量记录（同步函数，用于 LangGraph 节点）"""
+async def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: str) -> list[TrafficRecord]:
+    """生成流量记录（异步函数，用于 LangGraph 节点）"""
     try:
         logger.info(f"开始调用LLM生成流量: count={count}, industry={industry}, scenario={scenario}")
 
@@ -202,7 +202,11 @@ def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: s
             timeout=_get_llm_timeout(),
         )
 
-        response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
+        timeout = _get_llm_timeout()
+        response = await asyncio.wait_for(
+            llm.ainvoke(f"{system_prompt}\n\n请生成流量数据"),
+            timeout=timeout,
+        )
         content = getattr(response, "content", "")
 
         if not content:

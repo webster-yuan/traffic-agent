@@ -98,7 +98,7 @@ def rag_node(state: GraphState) -> GraphState:
 
 
 @traceable(name="generate_node", process_outputs=_summarize_generate_output)
-def generate_node(state: GraphState) -> GraphState:
+async def generate_node(state: GraphState) -> GraphState:
     _check_cancelled(state["session_id"])
     logger.info(f"session_id={state['session_id']} 流量生成开始")
 
@@ -109,7 +109,7 @@ def generate_node(state: GraphState) -> GraphState:
     )
     state["retrieved_cases"].append({"type": "llm_hint", "content": hint})
 
-    state["generated_records"] = generate_records_by_llm(
+    state["generated_records"] = await generate_records_by_llm(
         state["count"], state["stage"], state["industry"], state["scenario"]
     )
 

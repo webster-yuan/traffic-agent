@@ -14,9 +14,9 @@
 
 ## 2. 后端增强（紧随其后）
 
-### 2.1 异步 LLM 调用 + 超时 🟡
+### 2.1 异步 LLM 调用 + 超时 ✅（2026-05-01）
 
-`generate_records_by_llm()` 使用同步 `llm.invoke()` → 改为 `await llm.ainvoke()` + `asyncio.wait_for(timeout=...)`。当前 Ollama 本地调用不需此优化，但为未来远程 API 做准备。
+`generate_records_by_llm()` 改为 `async def` + `await asyncio.wait_for(llm.ainvoke(), timeout=...)`。`generate_node` 同步改为 `async def`。LangGraph 原生兼容异步节点。
 
 ---
 
@@ -86,3 +86,4 @@ Windows 10 + Ollama（当前）
 | RAG 升级（12 行业静态示例 JSON） | 2026-04-29 |
 | 历史筛选服务端化（7 维度 SQL WHERE） | 2026-04-29 |
 | 虚拟滚动（CSS content-visibility） | 2026-04-29 |
+| 异步 LLM 调用（ainvoke + asyncio.wait_for） | 2026-05-01 |

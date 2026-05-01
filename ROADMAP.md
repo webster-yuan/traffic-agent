@@ -70,18 +70,13 @@
 - `backend/app/graph/nodes.py:88-91` — `rag_node` 记录示例来源
 - `backend/data/examples/` — 12 个行业 JSON 文件
 
-### 2.2 LLM 调用未做超时/重试包装 🟡
+### 2.2 LLM 调用异步化 + 超时保护 ✅（2026-05-01）
 
-**位置**: `backend/app/services/generator.py:231-238`
+**已实现**: `generate_records_by_llm()` 改为 `async def`，`llm.invoke()` → `await asyncio.wait_for(llm.ainvoke(), timeout=...)`。`generate_node` 也改为 `async def`。LangGraph 原生支持异步节点，对 `graph.invoke()` 和 `graph.ainvoke()` 均透明。
 
-```python
-llm = ChatOllama(...)
-response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
-```
-
-**问题**: `llm.invoke()` 是同步调用，在 LangGraph 节点中直接执行。Ollama 本地模型响应慢（2-5s/call）时，事件循环被阻塞。也没有 try/except 处理 LLM 调用本身的网络错误、超时。
-**影响**: 当前 Ollama 本地部署不会网络超时，但模型卡死时整个请求挂起。将来换远程 API 时需要此机制。
-**建议**: 未来升级到异步 LLM 调用 `llm.ainvoke()` + `asyncio.wait_for()`。
+**位置**:
+- `backend/app/services/generator.py:156-210` — `async def generate_records_by_llm` + `asyncio.wait_for`
+- `backend/app/graph/nodes.py:100-114` — `async def generate_node` + `await generate_records_by_llm`
 
 ### 2.3 取消操作不能立即中断 Graph 执行 🟡
 
@@ -123,6 +118,7 @@ response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
 1. ~~RAG 升级（方案 A：静态示例文件）~~ ✅
 2. ~~历史筛选服务端化~~ ✅
 3. ~~虚拟滚动（CSS content-visibility + sticky thead）~~ ✅
+4. ~~异步 LLM 调用 + asyncio.wait_for 超时~~ ✅
 
 ### 3.2 下一阶段：环境升级 → Docker
 
