@@ -73,18 +73,19 @@ npx vite --host 127.0.0.1 --port 5173
 
 **5.1 终止前后端进程：**
 
-> ⚠️ uvicorn `--reload` 会 fork reloader + worker 两个进程，用 PID 单个杀不掉（reloader 会自动重启 worker），必须按镜像名杀进程树。
+> ⚠️ uvicorn `--reload` 会 fork reloader + worker 两个进程，用 PID 单个杀不掉（reloader 会自动重启 worker），必须按进程名终止全部实例。
+> ⚠️ 不要用 `taskkill 2>$null` 链式拼接，PowerShell 的 `2>$null` 在链式命令中会异常吞掉后续 stderr 导致实际上没执行。
 
 ```powershell
-# 按镜像名终止全部 python 和 node 进程（本机无其他同类服务，安全）
-taskkill /F /IM python.exe 2>$null
-taskkill /F /IM node.exe 2>$null
+# 用 PowerShell 原生的 Stop-Process，比 taskkill 可靠得多
+Stop-Process -Name python -Force -ErrorAction SilentlyContinue
+Stop-Process -Name node -Force -ErrorAction SilentlyContinue
 ```
 
-终止后验证端口已释放：
+终止后验证端口已释放（只看 LISTENING，忽略 TIME_WAIT / CLOSE_WAIT 等 TCP 残留状态）：
 
 ```powershell
-netstat -ano | Select-String "8000|5173"
+netstat -ano | Select-String "8000|5173" | Select-String "LISTENING"
 # 无输出 = 端口已释放
 ```
 
@@ -142,7 +143,7 @@ git commit -m "feat(scope): 简洁描述"
 | 2. 实现 | 按 karpathy-guidelines 编码 | 代码审查 |
 | 3. 自测 | 写测试 → 跑测试 | pytest 全绿 |
 | 4. 全链路 | 启动前后端 → Browser Agent | Chrome 验证通过 |
-| 5. 清理 | taskkill /IM 终止进程树 + 删除中间文件 | 端口释放、仓库整洁 |
+| 5. 清理 | Stop-Process 终止进程树 + 删除中间文件 | 端口释放、仓库整洁 |
 | 6. 文档 | 更新 ROADMAP.md / to-do.md | 状态一致 |
 | 7. 汇报 | 等用户批准 | 用户同意 |
 | 8. 提交 | git commit | 提交成功 |

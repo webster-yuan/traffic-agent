@@ -1,112 +1,110 @@
 # Traffic Agent 后续拓展路线
 
-## 1. 业务能力扩展
+> **更新**: 2026-04-29 — 已完成项移至末尾清单，仅保留可执行的增强建议。
 
-当前项目的核心价值可以从“生成几条流量数据”发展成面向安全研究、风控和测试数据构造的智能流量仿真平台。
+---
 
-优先方向是场景化生成：
+## 1. 前端增强（优先）
 
-- 攻击/异常场景：撞库、爬虫、刷单、接口爆破、羊毛党、异常路径访问。
-- 正常业务场景：登录、下单、派单、支付、退款、搜索、推荐、内容浏览。
-- 混合数据集：例如 95% 正常流量 + 5% 异常流量，用于训练检测模型。
-- 用户画像控制：真实用户、脚本用户、代理 IP 用户、高频用户、低频用户。
-- 时间分布控制：高峰期、夜间、突发流量、周期性波动。
+### 1.1 响应式布局 🔴
 
-适合引入：
+当前 CSS Grid 双栏布局在 768px 以下塌陷。加 `@media` 断点切换单栏。
 
-- Pydantic Schema：将业务场景定义为结构化配置。
-- LangGraph 子图：正常流量、异常流量、质量评估拆成不同 graph。
-- LangSmith Dataset：沉淀标准 case，用作回归测试和评估集。
+### 1.2 历史分页 🔴
 
-## 2. 数据质量和评估体系
+前端 `refreshHistory()` 固定拉取 20 条，后端已支持 `page`/`page_size`。加分页控件即可支持全部历史。
 
-现有质量评分可以继续产品化：
+### 1.3 虚拟滚动 🟡
 
-- 字段合法性检测：IP、端口、HTTP method、timestamp、URL path 是否合理。
-- 业务一致性检测：例如 `POST /orders` 不应该返回 404，支付接口不应该无请求体。
-- 异常标签准确性检测：生成的 fake/anomaly 是否符合异常特征。
-- 多样性检测：URL、IP、User-Agent、时间间隔是否过于重复。
-- 可解释评分：告诉用户为什么评分低，以及怎么调整 prompt 或参数。
+历史列表全量渲染，记录多后性能下降。引入 `vue-virtual-scroller`。
 
-适合引入：
+### 1.4 Tab 导航 🟢
 
-- Great Expectations / Pandera：结构化数据质量校验。
-- LangSmith Evaluators：对 LLM 输出做自动评估。
-- DuckDB：快速对 CSV 做统计分析和质量报告。
-- ECharts：前端展示分布图、评分雷达图、异常比例图。
+三个 Section（生成/批量/历史）堆在一页，需滚动。拆成 Tab 或 Sidebar 提高可读性。
 
-## 3. 调试与可观测平台化
+---
 
-当前已经接入 LangSmith，可继续增强：
+## 2. 后端增强（紧随其后）
 
-- 前端加“打开 LangSmith Trace”按钮。
-- 每次生成展示阶段耗时：RAG、生成、评估、重试次数。
-- 后端保存 trace metadata：session_id、行业、阶段、模型、耗时、评分。
-- 历史记录一键查看对应 LangSmith trace。
-- 支持失败诊断：LLM 超时、JSON 解析失败、质量不达标、重试耗尽。
+### 2.1 RAG 阶段升级 🔴
 
-适合引入：
+当前 RAG 是硬编码字典 + `mock_case`。改为加载行业示例 JSON 文件作为 few-shot 提示词，让 LLM 生成更贴合行业特征。
 
-- LangSmith Trace URL 关联。
-- OpenTelemetry：后续统一接 Grafana/Tempo。
-- Prometheus + Grafana：请求耗时、失败率、并发数。
-- Sentry：前后端异常捕获。
+**方案**:
+- 为每个行业维护 `data/examples/{industry}.json`，包含 3-5 条典型流量记录
+- RAG 节点读取对应文件，写入 `retrieved_cases`
+- LLM prompt 中动态注入行业示例
 
-## 4. 从工具走向平台
+### 2.2 industry 枚举校验 🟡
 
-后续可以引入项目、任务、数据集等概念：
+`TrafficGenerateRequest.industry` 接受任意字符串 → 改为 `Literal` 枚举，前端下拉也联动。
 
-- 生成任务：每次生成是一条 task，有状态、参数、输出、评分、trace。
-- 数据集管理：保存多个生成结果，支持下载、对比、合并、删除。
-- 模板管理：常用行业、场景、异常模式保存为模板。
-- Prompt 管理：不同场景对应不同 prompt 版本。
-- 多模型对比：同一场景用 Ollama、本地模型、云模型生成，对比质量和耗时。
-- 批量生成：一次生成多个场景的数据集。
+### 2.3 异步 LLM 调用 + 超时 🟡
 
-适合引入：
+`generate_records_by_llm()` 使用同步 `llm.invoke()` → 改为 `await llm.ainvoke()` + `asyncio.wait_for(timeout=...)`。当前 Ollama 本地调用不需此优化，但为未来远程 API 做准备。
 
-- SQLite -> PostgreSQL：任务和数据集变多后升级。
-- SQLModel / SQLAlchemy：规范管理任务、模板、数据集。
-- Celery / RQ / Dramatiq：生成任务异步化，避免 uvicorn 被长任务拖住。
-- Redis：任务队列、取消状态、进度缓存。
-- MinIO / 本地对象存储：管理 CSV/JSONL/Parquet 输出文件。
+---
 
-## 建议优先路线
+## 3. 数据质量深化（中期）
 
-### 第一阶段：把任务做稳
+- 字段合法性检测：IP 格式、端口范围、timestamp 合理性
+- 业务一致性检测：POST / 不应该返回空 body，DELETE 应返回特定状态码
+- 异常标签准确性检测：fake/anomaly 是否符合其特征描述
+- Great Expectations / Pandera 集成：结构化数据质量校验流水线
 
-- 任务模型化：新增或扩展 `generation_tasks` / `traffic_sessions` 表。
-- 前端历史记录从“文件结果”升级为“任务记录”。
-- 每个任务保存参数、状态、session_id、trace metadata、评分、错误信息。
-- 生成过程支持更可靠的取消和失败恢复。
+---
 
-### 第二阶段：把生成能力做强
+## 4. 平台化演进（远期 — 需 Docker）
 
-- 引入场景模板。
-- 支持异常流量比例。
-- 支持 JSONL / CSV / Parquet 多格式导出。
-- 增强质量评估和可解释报告。
+### 4.1 环境升级路径
 
-### 第三阶段：把调试体验做顺
+```
+Windows 10 + Ollama（当前）
+    → Windows 11 + Docker Desktop
+        → docker-compose: PostgreSQL + Redis + MinIO + app
+            → Celery 任务队列 + Prometheus + Grafana
+```
 
-- 前端加 LangSmith trace 跳转。
-- 展示阶段耗时、重试次数、失败原因。
-- 增加 Chrome DevTools MCP + Cursor + GPT-5.5 的端到端验收流程文档。
+### 4.2 核心数据库迁移
 
-### 第四阶段：把平台能力做厚
+- SQLite → PostgreSQL（持久化 + 并发读写）
+- 引入 SQLAlchemy ORM（替换原始 SQL）
 
-- 异步任务队列。
-- 数据集管理。
-- 多模型对比。
-- LangSmith Dataset/Evaluator 回归评估。
+### 4.3 异步任务队列
 
-## 当前建议切入点
+- 当前 `asyncio.create_task` → Celery + Redis
+- 支持任务持久化、失败重试、优先级
 
-~~先做"任务模型化 + trace 关联 + 前端任务详情展示"。这一块最贴近当前项目，也能把业务、LangGraph、LangSmith 和前端交互串起来。~~
+### 4.4 多模型对比 + 回归评估
 
-✅ **批量生成功能** 已完成（2026-04-29）。
-✅ **HTML 报表导出** 已完成（2026-04-29）。
-✅ **前端 Vite 代码分割** 已完成（2026-04-29）。
-✅ **ECharts 图表集成** 已完成（2026-04-29）：报表页用雷达图（质量）、饼图（身份分布）、柱状图（方法/状态码）替换 CSS 条状图。
+- 同一场景用 Ollama / 本地模型 / 云端 API 生成，对比质量
+- LangSmith Dataset + Evaluator 做回归测试
 
-下一步建议：**后端性能优化**（数据库索引、缓存）。
+### 4.5 模板 + Prompt 管理
+
+- 常用行业/场景/异常模式保存为模板
+- Prompt 版本化管理，支持 A/B 测试
+
+---
+
+## 5. 已实现项（备忘）
+
+以下功能已完成，不再列入待办：
+
+| 功能 | 日期 |
+|------|------|
+| LangGraph 四阶段流水线 | 2026-04 |
+| LangSmith Trace 集成 | 2026-04 |
+| 阶段时间线 + SSE 流式进度 | 2026-04 |
+| 历史高级筛选（7 维度） | 2026-04 |
+| 11 行业 + 场景自动推断 | 2026-04 |
+| 三维度质量评分 + 扣分说明 | 2026-04 |
+| CSV / JSON / Parquet 导出 | 2026-04 |
+| HTML 报表 + ECharts 图表 | 2026-04-29 |
+| 批量生成（10 任务 + 2s 轮询） | 2026-04-29 |
+| Vite 代码分割 | 2026-04-29 |
+| asyncio.Semaphore(3) 并发控制 | 2026-04 |
+| 任务取消 + 错误重试 | 2026-04 |
+| threading.local() 数据库连接 | 2026-04 |
+| 定期文件清理 (30 天) | 2026-04 |
+| pytest 测试覆盖（14 个） | 2026-04 |

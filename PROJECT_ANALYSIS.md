@@ -1,285 +1,181 @@
 # Traffic Agent 项目代码分析报告
 
-**分析日期**: 2026-04-19
-**分析范围**: 完整后端和前端代码
-**分析人**: Claude Code Agent
+**分析日期**: 2026-04-29
+**分析范围**: 完整后端 (`backend/app/`) 和前端 (`frontend/src/`) 代码
+**环境上下文**: Windows 10 + Ollama (qwen2.5:7b) 本地部署
+
+> ⚠️ 本报告**已排除**因开发环境（Win10 + 低配模型）导致的性能/并发问题，仅聚焦代码层面的架构和功能缺陷。环境类问题在 ROADMAP.md 中单独标记。
 
 ---
 
 ## 一、项目概览
 
-### 1.1 项目简介
-**Traffic Agent** 是一个基于 LLM 的网络流量数据生成和分析系统，用于安全研究和机器学习训练。
+### 1.1 核心架构
 
-### 1.2 核心功能
-- 基于大语言模型的流量数据生成（支持不同行业场景）
-- 多阶段处理流水线：RAG → 生成 → 评估 → 身份校验
-- 实时流式响应和进度跟踪
-- 会话管理和历史记录
-- CSV 数据导出
+```
+用户浏览器 (Vue 3 + Pinia + Vite)
+    │  SSE Stream / REST API
+    ▼
+FastAPI (uvicorn, port 8000)
+    │
+    ├── routes.py         API 端点（生成/历史/下载/报表/批量）
+    ├── session_service   SQLite CRUD
+    ├── generator.py      LLM 调用 + CSV/JSON/Parquet 写入
+    ├── report_service    HTML 报表（含 ECharts 图表）
+    │
+    ▼
+LangGraph 工作流（nodes.py + workflow.py）
+    │
+    ├── rag_node        场景推断 + 案例检索
+    ├── generate_node   LLM 流量生成
+    ├── eval_node       三维度质量评分（格式/业务/多样性）
+    └── identity_node   身份校验（full 模式）
+        │
+        ▼
+LangSmith Tracing (traceable 装饰器)
+SQLite (traffic_sessions / batch_sessions / batch_tasks)
+```
 
-### 1.3 技术栈
-**后端**: Python 3.11+, FastAPI, LangGraph, Ollama (Qwen2.5 7B), SQLite
-**前端**: Vue.js 3, TypeScript, Pinia, Vite
+### 1.2 技术栈
+
+| 层 | 技术 | 用途 |
+|----|------|------|
+| Web 框架 | FastAPI | REST API + SSE 流式 |
+| AI 编排 | LangGraph | 四阶段 DAG 流水线 |
+| AI 模型 | Ollama (qwen2.5:7b) | 流量数据生成 |
+| 数据库 | SQLite (threading.local) | 会话/批次持久化 |
+| 前端框架 | Vue 3 + Pinia + Vite | SPA 控制台 |
+| 可视化 | ECharts 5.6 | 报表雷达图/饼图/柱状图 |
+| 可观测 | LangSmith | LLM 调用追踪 |
+| 数据格式 | CSV + JSON + Parquet (Snappy) | 多格式导出 |
 
 ---
 
-## 二、架构分析
+## 二、前端代码分析
 
-### 2.1 后端架构
+### 2.1 架构概览
+
 ```
-app/
-├── api/routes.py          # API 端点层
-├── core/config.py         # 配置管理
-├── db/database.py         # 数据库层
+frontend/src/
+├── App.vue               单文件 SPA（生成 + 批量 + 历史 三个 Section）
+├── main.ts               Vue 挂载入口
+├── api/trafficApi.ts     所有 API 调用 + SSE 流式解析
+├── stores/trafficStore.ts Pinia store（状态 + 历史筛选 + 批量子弹）
+└── style.css             全局样式（CSS Grid 布局）
+```
+
+**特点**:
+- 无路由，单页面三面板
+- 无组件拆分（所有 UI 在 App.vue 模板中）
+- Store 承担全部业务逻辑（生成、历史、批量、筛选）
+
+### 2.2 问题清单
+
+#### 🔴 P0 — 响应式布局缺失
+
+**位置**: `App.vue` + `style.css`
+
+桌面端使用 CSS Grid 双栏布局 (`.container { grid-template-columns: 1fr 400px }`)，无任何 `@media` 断点。在视口 < 768px 时出现水平滚动条，内容溢出。
+
+**建议**: 添加 `@media (max-width: 768px)` 规则，切换为 `grid-template-columns: 1fr`。
+
+#### 🔴 P0 — 历史记录无分页
+
+**位置**: `stores/trafficStore.ts:151-153`
+
+```typescript
+async refreshHistory() {
+    const data = await listHistory(1, 20)  // 固定 page=1
+    this.history = data.items
+}
+```
+
+后端返回 `total_pages` 字段，但前端完全没用。超过 20 条历史记录无法查看。
+
+**建议**: History Section 底部加分页按钮，传递 `page` 参数。
+
+#### 🔴 P0 — 历史筛选纯前端，无后端过滤
+
+**位置**: `stores/trafficStore.ts:114-145`
+
+`filteredHistory` getter 在客户端对已加载的 20 条做多维度过滤。后端 `/history` 接口不支持筛选参数（仅 page/page_size）。如果未来前端暴露分页，需要同时给后端加筛选 query params。
+
+**建议**: 后端 `/history` 增加 `industry`/`status`/`stage`/`keyword`/`date_from`/`date_to`/`min_quality` 参数。
+
+#### 🟡 P1 — 无组件拆分
+
+**位置**: `App.vue` 整个文件 394 行。
+
+所有 UI（生成表单、批量面板、历史表格、任务详情卡片）在一个文件中。修改一个面板需要在大模板中定位。
+
+**建议**: 拆为独立组件：
+- `GeneratePanel.vue`
+- `BatchPanel.vue`
+- `HistoryTable.vue`
+- `TaskDetailCard.vue`
+
+#### 🟡 P1 — 历史列表无虚拟滚动
+
+**位置**: `App.vue:304-326`
+
+`v-for` 直接渲染全部 `filteredHistory`，无虚拟滚动。当前数据量 (< 100 条) 无感，但记录增长后性能下降。
+
+**建议**: 引入 `vue-virtual-scroller` 或 `@tanstack/vue-virtual`。
+
+#### 🟢 P2 — 报表链接体验可改进
+
+**位置**: `App.vue:386-388`
+
+```html
+<a :href="store.reportUrl(...)" target="_blank">📊 导出 HTML 报告</a>
+```
+
+- 无 PDF 导出入口，用户需手动 Ctrl+P
+- 链接在详情卡片底部，不够显眼
+
+**建议**: 
+- 历史表格加"报表"列，直接可点击
+- 后端加 `?format=pdf` 参数
+
+#### 🟢 P2 — UI 导航扁平
+
+生成/批量/历史三个 Section 堆叠，需滚动。小屏下尤其不友好。
+
+**建议**: 顶部加 Tab 切换或左侧 Sidebar。
+
+---
+
+## 三、后端代码分析
+
+### 3.1 架构概览
+
+```
+backend/app/
+├── main.py               FastAPI app 创建 + CORS
+├── api/routes.py          所有 API 端点（508 行）
+├── core/
+│   ├── config.py          Settings (pydantic BaseModel)
+│   └── state.py           取消状态管理（内存 set）
+├── db/database.py         SQLite threading.local 连接 + init_db
 ├── graph/
-│   ├── workflow.py       # LangGraph 工作流编排
-│   ├── nodes.py          # 处理节点
-│   └── state.py          # 状态定义
-├── models/schemas.py      # 数据模型
-└── services/             # 业务逻辑
-    ├── generator.py      # 核心生成逻辑
-    ├── langchain_service.py
-    ├── session_service.py
-    └── graph_runner.py
+│   ├── state.py           GraphState TypedDict
+│   ├── nodes.py           rag/generate/eval/identity 四节点（168 行）
+│   └── workflow.py        图构建 + lru_cache 编译（50 行）
+├── models/schemas.py      Pydantic 数据模型（111 行）
+└── services/
+    ├── generator.py        LLM 调用 + 质量评分 + CSV/JSON/Parquet（623 行）
+    ├── session_service.py  会话 CRUD + 批量任务（303 行）
+    ├── report_service.py   HTML 报表 + ECharts（~280 行）
+    ├── graph_runner.py     Graph 执行封装
+    ├── langchain_service.py LLM hint 构建
+    └── tracing_config.py  LangSmith 配置
 ```
 
-### 2.2 数据流
-1. **RAG阶段**: 根据 `industry` 推断场景（目前为mock实现）
-2. **生成阶段**: LLM 生成流量记录（75% real + 25% fake）
-3. **评估阶段**: 质量评分（格式30% + 业务40% + 多样性30%），不通过则重试
-4. **身份校验阶段**: 验证流量模式（仅在 full 模式下）
+### 3.2 问题清单
 
----
+#### 🔴 P0 — RAG 阶段是 Mock 实现
 
-## 三、潜在问题分析
-
-### 🔴 高优先级问题
-
-#### 3.1.1 SQLite 线程安全问题
-**位置**: `backend/app/db/database.py:10`
-
-```python
-conn = sqlite3.connect(db_path, check_same_thread=False)
-```
-
-**问题**:
-- `check_same_thread=False` 允许从任何线程访问连接
-- 在 `session_service.py` 中多个函数可能被不同请求线程同时调用
-- SQLite 不是线程安全的，可能导致数据损坏或连接冲突
-
-**影响**: 高 - 可能导致数据丢失或损坏
-
-**建议修复**:
-```python
-# 方案1: 每个线程使用连接池
-import threading
-_thread_local = threading.local()
-def get_connection():
-    if not hasattr(_thread_local, "conn"):
-        _thread_local.conn = sqlite3.connect(...)
-    return _thread_local.conn
-
-# 方案2: 使用单线程模式并加锁
-_conn_lock = threading.Lock()
-def get_connection():
-    with _conn_lock:
-        conn = sqlite3.connect(...)
-    return conn
-```
-
----
-
-#### 3.1.2 并发限制过于严格
-**位置**: `backend/app/api/routes.py:31-43`
-
-```python
-_run_lock = asyncio.Lock()
-```
-
-**问题**:
-- 全局只有一个锁 (`_run_lock`)
-- 任何生成请求都会阻塞其他请求
-- 无法同时处理多个用户的请求
-
-**影响**: 高 - 严重影响用户体验
-
-**建议**:
-```python
-# 方案1: 改为并发池
-from asyncio import Semaphore
-_semaphore = asyncio.Semaphore(3)  # 允许3个并发
-
-@router.post("/generate")
-async def generate_traffic(...):
-    async with _semaphore:
-        # ...
-```
-
----
-
-#### 3.1.3 流式响应取消功能有限
-**位置**: `backend/app/api/routes.py:222-226`
-
-```python
-@router.delete("/generate/{session_id}")
-async def cancel_generate(session_id: str) -> dict[str, str | bool]:
-    _cancelled_sessions.add(session_id)
-    update_status(session_id, SessionStatus.cancelled)
-    return {"success": True, ...}
-```
-
-**问题**:
-- 取消操作只设置了标记，不会立即停止正在运行的 graph
-- graph 在事件循环中运行，取消标记检查有限
-- 用户的 HTTP 请求会等待整个 graph 执行完成
-
-**影响**: 高 - 用户体验差，无法及时响应取消请求
-
-**建议**:
-```python
-# 在节点中添加取消检查
-def rag_node(state: GraphState) -> GraphState:
-    if state["session_id"] in _cancelled_sessions:
-        raise RuntimeError("Task cancelled")
-    # ...
-```
-
----
-
-#### 3.1.4 错误处理不够完善
-**位置**: `backend/app/services/generator.py:182-228`
-
-```python
-response = llm.invoke(...)
-# 直接使用 response，没有检查异常
-content = getattr(response, "content", "")
-if not content:
-    raise ValueError("LLM返回为空")
-```
-
-**问题**:
-- 没有检查 LLM 调用的超时、网络错误
-- JSON 解析失败后只尝试简单修复，可能不够健壮
-- 没有记录失败的 JSON 示例用于调试
-
-**影响**: 高 - 请求可能静默失败
-
-**建议**:
-```python
-try:
-    response = await asyncio.wait_for(
-        llm.ainvoke(prompt),
-        timeout=settings.llm_timeout
-    )
-except asyncio.TimeoutError:
-    logger.error("LLM timeout")
-    raise
-```
-
----
-
-#### 3.1.5 会话文件没有自动清理
-**位置**: `backend/app/api/routes.py:229-237`
-
-```python
-@router.get("/download/{session_id}")
-async def download_csv(session_id: str) -> FileResponse:
-    file_path = get_session_file(session_id)
-    # ...
-```
-
-**问题**:
-- CSV 文件只通过手动删除清理
-- 数据库中的 `file_path` 字段可能指向不存在的文件
-- 没有定期清理机制，可能导致磁盘空间耗尽
-
-**影响**: 中 - 影响系统长期运行
-
-**建议**:
-```python
-# 定期清理脚本
-import schedule
-import time
-
-def cleanup_old_files():
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, file_path FROM traffic_sessions "
-            "WHERE created_at < datetime('now', '-30 days')"
-        ).fetchall()
-        for row in rows:
-            if row["file_path"]:
-                Path(row["file_path"]).unlink(missing_ok=True)
-            delete_session(row["id"])
-
-schedule.every(24).hours.do(cleanup_old_files)
-```
-
----
-
-### 🟡 中优先级问题
-
-#### 3.2.1 缺少认证和授权机制
-**位置**: `backend/app/main.py:9-15`
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源
-    allow_credentials=True,
-)
-```
-
-**问题**:
-- 没有任何身份验证（API Key、JWT 等）
-- CORS 允许所有来源
-- 如果部署到公网，任何人都可以调用 API
-
-**影响**: 中 - 安全风险
-
-**建议**:
-```python
-from fastapi.security import APIKeyHeader
-api_key_header = APIKeyHeader(name="X-API-Key")
-
-@app.post("/generate")
-async def generate_traffic(..., api_key: str = Depends(api_key_header)):
-    # 验证 api_key
-```
-
----
-
-#### 3.2.2 输入验证不够严格
-**位置**: `backend/app/models/schemas.py:22-25`
-
-```python
-class TrafficGenerateRequest(BaseModel):
-    industry: str = Field(..., min_length=1, max_length=64)
-    count: int = Field(default=100, ge=1, le=10000)  # 最多10000
-    stage: Stage = Field(default=Stage.standard)
-```
-
-**问题**:
-- 最大值 10000 可能不够大
-- `industry` 字段可以接受任意字符串，没有枚举限制
-- 没有验证 `timestamp` 格式等
-
-**影响**: 中 - 可能导致数据质量问题
-
-**建议**:
-```python
-INDUSTRIES = ["government", "ecommerce", "short_video", ...]
-
-class TrafficGenerateRequest(BaseModel):
-    industry: Literal[*INDUSTRIES]
-    count: int = Field(ge=1, le=100000)  # 提高上限
-```
-
----
-
-#### 3.2.3 RAG 阶段是 Mock 实现
-**位置**: `backend/app/graph/nodes.py:31-43`
+**位置**: `backend/app/graph/nodes.py:84-97`
 
 ```python
 def rag_node(state: GraphState) -> GraphState:
@@ -289,354 +185,180 @@ def rag_node(state: GraphState) -> GraphState:
     ]
 ```
 
-**问题**:
-- 场景推断只是简单的字典映射
-- 没有真正的知识库检索
-- 没有提供不同行业的真实案例数据
+**问题**: `infer_scenario()` 是硬编码字典映射（`industry → "通勤高峰"` 等），`retrieved_cases` 是写死的 `"mock_case"`。没有真正的知识库检索，LLM 生成依赖 prompt 中仅 2 条电商硬编码示例（`_get_examples()`），跨行业泛化能力弱。
 
-**影响**: 中 - 无法支持更多行业
+**影响**: 除电商外的行业，LLM 生成的 URL 和请求体往往不符合行业特征。
 
-**建议**:
+**修复方案**:
 ```python
-# 集成真正的 RAG
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
+# 方案 A（轻量，推荐先做）
+import json
+from pathlib import Path
+
+EXAMPLES_DIR = Path("data/examples")
 
 def rag_node(state: GraphState) -> GraphState:
-    # 使用向量数据库检索相关案例
-    # 返回真实的历史流量案例
+    state["scenario"] = infer_scenario(state["industry"])
+    
+    # 加载行业示例文件
+    example_file = EXAMPLES_DIR / f"{state['industry']}.json"
+    if example_file.exists():
+        examples = json.loads(example_file.read_text())
+        state["retrieved_cases"] = [
+            {"type": "few_shot", "content": ex} for ex in examples[:5]
+        ]
+    else:
+        state["retrieved_cases"] = [
+            {"type": "fallback", "content": "mock_case"}
+        ]
+    return state
 ```
 
----
+#### 🔴 P0 — industry 字段无输入校验
 
-#### 3.2.4 CSV 文件大小限制
-**位置**: `backend/app/services/generator.py:312-361`
+**位置**: `backend/app/models/schemas.py:22-23`
 
 ```python
-def write_csv(session_id: str, records: list[TrafficRecord], industry: str) -> str:
-    # 没有检查 records 数量
+class TrafficGenerateRequest(BaseModel):
+    industry: str = Field(..., min_length=1, max_length=64)
 ```
 
-**问题**:
-- 生成大量记录时可能超出内存限制
-- CSV 文件可能过大导致性能问题
-- 没有分块写入或压缩选项
+**问题**: 接受任意字符串。`"asdf"` 通过校验但 `infer_scenario()` 返回 `"自定义场景"`，`_industry_context()` 返回 `"自定义业务接口"`，`_industry_paths()` 返回空列表 → 评分全零，生成质量极差。
 
-**影响**: 中 - 大规模生成时可能崩溃
-
-**建议**:
+**修复**:
 ```python
-# 使用分块写入或 Parquet 格式
-import pandas as pd
-df = pd.DataFrame([r.model_dump() for r in records])
-df.to_parquet(f"{output_dir}/traffic_{session_id}.parquet")
+from typing import Literal
+
+VALID_INDUSTRIES = Literal[
+    "government", "ecommerce", "short_video", "ride_hailing",
+    "logistics", "delivery", "finance", "healthcare",
+    "media", "social", "gaming", "custom",
+]
+
+class TrafficGenerateRequest(BaseModel):
+    industry: VALID_INDUSTRIES = Field(...)
 ```
 
----
+#### 🟡 P1 — /history 端点无服务端筛选
 
-#### 3.2.5 缺少 API 限流
-**位置**: `backend/app/api/routes.py`
-
-**问题**:
-- 没有实现速率限制（如 100 req/min）
-- 没有 IP 限制
-- 容易被滥用或 DDoS
-
-**影响**: 中 - 可能导致服务过载
-
-**建议**:
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-
-@router.post("/generate")
-@limiter.limit("10/minute")
-async def generate_traffic(...):
-    ...
-```
-
----
-
-#### 3.2.6 前端错误边界不足
-**位置**: `frontend/src/stores/trafficStore.ts:39-80`
-
-```typescript
-async startGenerate(payload: GeneratePayload) {
-    this.running = true
-    this.progress = 0
-    // ...
-    generateTrafficStream(
-        payload,
-        (sessionId) => { ... },
-        (event) => { ... },
-        (event) => { ... },
-        (event) => { ... },
-        () => { ... },  // 成功回调
-        (error) => {    // 错误回调
-            this.progressText = `错误: ${error}`
-        }
-    )
-}
-```
-
-**问题**:
-- 没有全局错误处理
-- 网络错误时没有重试机制
-- 加载状态可能卡住
-
-**影响**: 中 - 用户体验差
-
-**建议**:
-```typescript
-// 添加重试逻辑
-const MAX_RETRIES = 3
-let retryCount = 0
-
-async function startGenerate(payload: GeneratePayload) {
-    try {
-        // ...
-    } catch (error) {
-        if (retryCount < MAX_RETRIES) {
-            retryCount++
-            await new Promise(r => setTimeout(r, 1000))
-            await startGenerate(payload)  // 重试
-        }
-    }
-}
-```
-
----
-
-#### 3.2.7 缺少测试
-**位置**: 整个项目
-
-**问题**:
-- 没有单元测试
-- 没有集成测试
-- 核心逻辑没有测试覆盖
-
-**影响**: 中 - 重构和修改风险高
-
-**建议**:
-```python
-# backend/app/tests/test_generator.py
-def test_generate_records():
-    records = generate_records(100, Stage.standard, "ecommerce")
-    assert len(records) == 100
-    assert sum(1 for r in records if r.identity_label == "fake") >= 25
-```
-
----
-
-#### 3.2.8 环境变量验证不足
-**位置**: `backend/app/core/config.py:13-28`
+**位置**: `backend/app/api/routes.py:349-362`
 
 ```python
-class Settings(BaseModel):
-    langchain_tracing_v2: bool = False
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b-instruct-q4_K_M"
+@router.get("/history")
+async def get_history(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    total, items = list_history(page, page_size)
 ```
 
-**问题**:
-- 没有验证必需的环境变量（如 Ollama 是否运行）
-- 默认值可能不安全（如 localhost）
-- 缺少 Ollama 健康检查
+**问题**: 仅支持分页，无任何筛选参数。前端所有筛选逻辑在 store 中做客户端过滤。未来需要加 `industry`/`status`/`stage`/`keyword` 等 query params。
 
-**影响**: 中 - 启动时可能静默失败
+#### 🟡 P1 — LLM 调用为同步阻塞
 
-**建议**:
-```python
-class Settings(BaseModel):
-    ollama_base_url: str = Field(..., description="Ollama 服务地址")
-
-    def validate_ollama_connection(self) -> bool:
-        try:
-            response = requests.get(f"{self.ollama_base_url}/api/tags", timeout=5)
-            return response.status_code == 200
-        except:
-            raise RuntimeError("Cannot connect to Ollama")
-```
-
----
-
-### 🟢 低优先级问题（环境相关）
-
-#### 3.3.1 SQLite 在 Windows 上的性能限制
-**位置**: `backend/app/db/database.py:10`
-
-**问题**:
-- SQLite 在高并发写入场景下性能有限
-- Windows 文件锁机制可能影响性能
-- 大文件时的 I/O 性能不如 PostgreSQL
-
-**影响**: 低 - 本地开发影响小，生产环境影响大
-
-**建议**:
-- 开发环境保持 SQLite
-- 生产环境使用 PostgreSQL
-
----
-
-#### 3.3.2 文件路径特殊字符处理
-**位置**: `backend/app/services/generator.py:312`
+**位置**: `backend/app/services/generator.py:238`
 
 ```python
-file_path = output_dir / f"traffic_{industry}_{session_id}.csv"
+response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
 ```
 
-**问题**:
-- 在 Windows 上，文件名中的 `:`、`<`、`>`、`|` 等字符会被截断
-- session_id 是随机生成的 UUID hex，理论上不会有问题
-- 但 `industry` 可能包含特殊字符
+**问题**: `ChatOllama.invoke()` 是同步调用。在 LangGraph 节点内直接阻塞事件循环，期间无法响应其他请求。当前 Ollama 本地部署无此问题，但生产环境或换远程 API 时需改为 `await llm.ainvoke()`。
 
-**影响**: 低 - 小概率问题
+#### 🟡 P1 — /generate (sync) 端点冗余
 
-**建议**:
+**位置**: `backend/app/api/routes.py:55-108`
+
+同步 `/generate` 端点直接调用 `run_generation_graph()` 阻塞返回。前端默认走 `/generate/stream` 流式端点获取 SSE 进度。同步端点仅保留兼容，但代码量不小（60 行），与流式端点有大段重复。
+
+**建议**: 标记 deprecated 或提取公共逻辑到 service 层。
+
+#### 🟡 P1 — 取消操作无法中断 LLM 调用
+
+**位置**: `backend/app/graph/nodes.py:23-26` + `backend/app/services/generator.py:238`
+
 ```python
-def sanitize_filename(name: str) -> str:
-    # 移除或替换 Windows 禁止的字符
-    return re.sub(r'[<>:"|?*]', '_', name)
-
-file_path = output_dir / f"traffic_{sanitize_filename(industry)}_{session_id}.csv"
+def _check_cancelled(session_id: str) -> None:
+    if is_cancelled(session_id):
+        raise RuntimeError("Task cancelled by user")
 ```
 
----
+**问题**: `_check_cancelled()` 在每个节点开始时检查，但 LLM 调用 `llm.invoke()` 在 `generate_node` 内部执行，期间无法响应取消。用户点击取消后需等待当前 LLM 调用返回（10-60 秒）。
 
-#### 3.3.3 开发环境配置不适合生产
+**影响**: 用户体验差，但受限于 LangGraph + 同步 LLM 调用的架构约束，当前无法根本解决。
+
+#### 🟢 P2 — 无 API 鉴权
+
 **位置**: `backend/app/main.py:9-15`
 
 ```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源
-    allow_credentials=True,
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], ...)
 ```
 
-**问题**:
-- CORS 允许所有来源
-- 没有配置生产服务器（Gunicorn + Uvicorn workers）
-- 没有启用 gzip 压缩
-- 没有启用请求日志
+纯本地开发场景无风险，但无任何 token/key 验证。公网部署时需加。
 
-**影响**: 低 - 仅影响生产环境部署
+#### 🟢 P2 — `on_event("startup")` 已 deprecated
 
-**建议**:
-```bash
-# 生产环境启动
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app \
-    --bind 0.0.0.0:8000 \
-    --access-logfile - \
-    --error-logfile -
-```
+**位置**: `backend/app/main.py:19`
 
----
-
-#### 3.3.4 日志没有轮转
-**位置**: 整个项目
-
-**问题**:
-- 使用标准 `logging` 模块，没有文件大小限制
-- 日志会无限增长，占用磁盘空间
-- 没有日志级别控制
-
-**影响**: 低 - 长时间运行后可能影响性能
-
-**建议**:
 ```python
-import logging
-from logging.handlers import RotatingFileHandler
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
+```
 
-handler = RotatingFileHandler(
-    'traffic_agent.log',
-    maxBytes=10*1024*1024,  # 10MB
-    backupCount=5
-)
+FastAPI 推荐使用 lifespan context manager。当前仍可工作但有 deprecation warning。
+
+**修复**:
+```python
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 ```
 
 ---
 
-## 四、安全风险评估
+## 四、已解决的过往问题
 
-| 风险项 | 严重程度 | 说明 |
-|--------|---------|------|
-| 无身份验证 | 🔴 高 | 任何人都可以调用 API |
-| 无授权机制 | 🔴 高 | 无法限制用户或 API Key |
-| 数据库连接线程安全 | 🔴 高 | 可能导致数据损坏 |
-| CORS 全白名单 | 🟡 中 | 可能被恶意网站调用 |
-| 无 API 限流 | 🟡 中 | 容易被滥用 |
-| 日志未脱敏 | 🟢 低 | 可能泄露敏感信息 |
-
----
-
-## 五、性能问题
-
-| 问题 | 影响 | 建议 |
-|------|------|------|
-| 单一并发锁 | ⭐⭐⭐⭐⭐ | 改为并发池 |
-| SQLite 单线程 | ⭐⭐⭐⭐ | 改为多线程或更换数据库 |
-| 无缓存机制 | ⭐⭐⭐ | 添加 Redis 缓存 |
-| 大文件处理 | ⭐⭐⭐ | 分块或使用 Parquet |
-| LLM 超时无控制 | ⭐⭐ | 添加超时机制 |
+| 问题 | 原状态 | 当前状态 |
+|------|--------|---------|
+| SQLite `check_same_thread=False` 线程不安全 | 全局单连接 | ✅ `threading.local()` 每线程独立连接 |
+| `asyncio.Lock()` 全局互斥 | 单并发锁 | ✅ `Semaphore(3)` 三并发池 |
+| 取消只设标记不检查 | 无法中断 | ✅ 每个节点入口 `_check_cancelled()` |
+| CSV header/body 内嵌 JSON 不规范 | 大 CSV 问题 | ✅ 并行写入 JSON + Parquet 侧车文件 |
+| 质量评分随机 | 无意义评分 | ✅ 三维度确定性评分 + 扣分说明 |
+| 前端无错误处理 | 静默失败 | ✅ 错误卡片 + 重试按钮 + SSE error 事件 |
+| 无测试 | 0% 覆盖率 | ✅ 14 个 pytest 覆盖核心模块 |
+| 无报表 | 只能下载 CSV | ✅ HTML + ECharts 四图表 |
 
 ---
 
-## 六、测试覆盖率
+## 五、建议优先修复顺序
 
-| 模块 | 测试状态 | 覆盖率 |
-|------|---------|--------|
-| API Routes | ❌ 无 | 0% |
-| Services | ❌ 无 | 0% |
-| Graph Nodes | ❌ 无 | 0% |
-| Database | ❌ 无 | 0% |
-| Frontend | ❌ 无 | 0% |
+### 第一批：快赢（1-2 天）
 
----
+1. **industry 枚举校验** — 改动 1 行 + 前端联动，立竿见影防呆
+2. **历史分页** — 前端加分页按钮，后端接口已就绪
 
-## 七、建议优先修复顺序
+### 第二批：高价值（3-5 天）
 
-### 第一阶段（1-2周）
-1. 修复 SQLite 线程安全问题
-2. 添加身份验证（API Key）
-3. 改进并发控制
-4. 添加取消功能的正确实现
+3. **RAG 升级** — 11 个行业各 3-5 条示例 JSON，生成质量明显提升
+4. **响应式布局** — 加 @media 断点，移动端可用
+5. **/history 后端筛选** — 加 query params，支持大规模历史
 
-### 第二阶段（2-4周）
-5. 添加认证和授权
-6. 添加 API 限流
-7. 添加基础测试
-8. 实现真实的 RAG 阶段
+### 第三批：体验打磨（1-2 周）
 
-### 第三阶段（4-8周）
-9. 添加日志轮转
-10. CSV 分块写入
-11. 优化错误处理
-12. 添加文档
+6. **Tab 导航** — 三 Section 拆 Tab，改善信息密度
+7. **组件拆分** — App.vue 拆 4 个子组件
+8. **on_event → lifespan** — 消除 deprecation warning
 
----
+### 不急于处理
 
-## 八、总结
-
-Traffic Agent 项目整体架构清晰，使用了较新的技术栈。主要问题集中在：
-
-1. **并发和线程安全**：这是最紧急的问题，可能导致数据损坏
-2. **安全性**：没有任何身份验证，部署到公网风险极高
-3. **可用性**：并发限制和取消功能不够完善
-4. **可维护性**：缺少测试和文档
-
-建议按照第一阶段 → 第二阶段 → 第三阶段的顺序逐步改进。
-
----
-
-## 附录：环境相关 TODO
-
-以下问题与 Windows 开发环境相关，优先级较低：
-
-- [ ] SQLite 在 Windows 上的性能优化（中）
-- [ ] 文件路径特殊字符处理（低）
-- [ ] 日志文件轮转配置（低）
-- [ ] 生产环境部署配置（低）
+- 虚拟滚动（当前数据量 < 100 条无必要）
+- API 鉴权（纯本地开发无风险）
+- 异步 LLM 调用（Ollama 本地无网络延迟）
+- 取消立即中断（受架构约束，短期无解）

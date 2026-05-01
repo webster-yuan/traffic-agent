@@ -103,6 +103,8 @@ export const useTrafficStore = defineStore('traffic', {
     resultMessage: '',
     downloadPath: '',
     history: [] as HistoryItem[],
+    historyPage: 1,
+    historyTotalPages: 1,
     historyFilters: createHistoryFilters(),
     abortController: null as AbortController | null,
     // batch state
@@ -148,9 +150,16 @@ export const useTrafficStore = defineStore('traffic', {
     inferScenario(industry: string) {
       return INDUSTRY_SCENARIO[industry] || '自定义场景'
     },
-    async refreshHistory() {
-      const data = await listHistory(1, 20)
+    async refreshHistory(page?: number) {
+      const p = page ?? this.historyPage
+      const data = await listHistory(p, 20)
       this.history = data.items
+      this.historyPage = data.page
+      this.historyTotalPages = data.total_pages
+    },
+    async goHistoryPage(page: number) {
+      if (page < 1 || page > this.historyTotalPages) return
+      await this.refreshHistory(page)
     },
     resetStageSteps() {
       this.stageSteps = createStageSteps()

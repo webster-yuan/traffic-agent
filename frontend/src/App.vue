@@ -8,7 +8,7 @@ const industry = ref('ride_hailing')
 const stage = ref<Stage>('standard')
 const count = ref(100)
 const selectedSessionId = ref('')
-
+const activeTab = ref<'generate' | 'batch' | 'history'>('generate')
 const industryOptions = [
   { value: 'government', label: '政府机关' },
   { value: 'ecommerce', label: '电商物流' },
@@ -106,7 +106,18 @@ onMounted(async () => {
 
 <template>
   <main class="container">
-    <section class="panel">
+    <nav class="tabs">
+      <button :class="{ active: activeTab === 'generate' }" @click="activeTab = 'generate'">
+        🎯 生成
+      </button>
+      <button :class="{ active: activeTab === 'batch' }" @click="activeTab = 'batch'">
+        📦 批量
+      </button>
+      <button :class="{ active: activeTab === 'history' }" @click="activeTab = 'history'">
+        📋 历史
+      </button>
+    </nav>
+    <section v-if="activeTab === 'generate'" class="panel">
       <h1>Traffic Agent 控制台</h1>
       <p class="desc">主Agent协调前后端：当前运行单并发、最多重试3次并返回最新结果。</p>
 
@@ -182,7 +193,7 @@ onMounted(async () => {
       <p v-else class="result">{{ store.resultMessage }}</p>
     </section>
 
-    <section class="panel">
+    <section v-if="activeTab === 'batch'" class="panel">
       <h2>批量生成</h2>
       <p class="desc">添加多个任务，一次性批量生成。任务按顺序执行，每2秒刷新状态。</p>
 
@@ -240,7 +251,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section class="panel">
+    <section v-if="activeTab === 'history'" class="panel">
       <h2>历史记录</h2>
       <div class="history-filter">
         <label>
@@ -288,7 +299,16 @@ onMounted(async () => {
         </label>
         <button class="ghost neutral" @click="store.resetHistoryFilters">重置筛选</button>
       </div>
-      <p class="meta">已显示 {{ store.filteredHistory.length }} / {{ store.history.length }} 条历史记录</p>
+      <p class="meta">已显示 {{ store.filteredHistory.length }} / {{ store.history.length }} 条历史记录 · 第 {{ store.historyPage }} / {{ store.historyTotalPages }} 页</p>
+      <div v-if="store.historyTotalPages > 1" class="pagination">
+        <button :disabled="store.historyPage <= 1" @click="store.goHistoryPage(store.historyPage - 1)">
+          ← 上一页
+        </button>
+        <span class="page-info">第 {{ store.historyPage }} 页 / 共 {{ store.historyTotalPages }} 页</span>
+        <button :disabled="store.historyPage >= store.historyTotalPages" @click="store.goHistoryPage(store.historyPage + 1)">
+          下一页 →
+        </button>
+      </div>
       <table>
         <thead>
           <tr>
