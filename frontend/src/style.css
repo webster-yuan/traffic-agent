@@ -256,6 +256,29 @@ table {
   border-collapse: collapse;
 }
 
+.history-table-wrap {
+  max-height: 55vh;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.history-table-wrap thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.history-table-wrap thead th {
+  background: #f8fafc;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.history-table-wrap tbody tr {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
+}
+
 th,
 td {
   border-bottom: 1px solid #e5e7eb;

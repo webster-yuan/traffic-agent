@@ -45,11 +45,9 @@
 
 **已实现**: `GET /history` 端点接受 7 个可选筛选参数 (`keyword`/`industry`/`stage`/`status`/`date_from`/`date_to`/`min_quality`)，后端 SQLite 动态 WHERE 查询。前端 `filteredHistory` getter 已移除，筛选变更自动请求服务端并重置分页。
 
-### 1.4 无虚拟滚动 🟡
+### 1.4 无虚拟滚动 ✅（2026-04-29）
 
-**当前问题**: 历史记录列表全量渲染到 DOM，没有虚拟滚动。
-**影响**: 记录超过数百条时渲染性能下降。
-**建议**: 引入 `vue-virtual-scroller`。
+**已实现**: 纯 CSS 方案，无需引入第三方库。`.history-table-wrap` 容器 `max-height:55vh; overflow-y:auto` 限定可视区域，`thead position:sticky; top:0` 粘性表头，`tbody tr content-visibility:auto` 浏览器原生跳过屏外渲染。配合服务端分页（20 条/页），DOM 节点始终受控。
 
 ### 1.5 报表仅支持新标签打开 🟡
 
@@ -124,6 +122,7 @@ response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
 
 1. ~~RAG 升级（方案 A：静态示例文件）~~ ✅
 2. ~~历史筛选服务端化~~ ✅
+3. ~~虚拟滚动（CSS content-visibility + sticky thead）~~ ✅
 
 ### 3.2 下一阶段：环境升级 → Docker
 

@@ -82,6 +82,7 @@ onMounted(async () => {
         下一页 →
       </button>
     </div>
+    <div class="history-table-wrap">
     <table>
       <thead>
         <tr>
@@ -117,6 +118,7 @@ onMounted(async () => {
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div v-if="selectedTask" class="detail-card">
       <h3>任务详情</h3>

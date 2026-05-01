@@ -6,9 +6,9 @@
 
 ## 1. 前端增强（优先）
 
-### 1.1 虚拟滚动 🟡
+### 1.1 虚拟滚动 ✅（2026-04-29）
 
-历史列表全量渲染，记录多后性能下降。引入 `vue-virtual-scroller`。
+纯 CSS 方案：固定高度可滚动容器（`.history-table-wrap`）+ 粘性表头 + `content-visibility:auto` 浏览器原生虚拟化。配合服务端分页，无需第三方库。
 
 ---
 
@@ -85,3 +85,4 @@ Windows 10 + Ollama（当前）
 | pytest 测试覆盖（14 个） | 2026-04 |
 | RAG 升级（12 行业静态示例 JSON） | 2026-04-29 |
 | 历史筛选服务端化（7 维度 SQL WHERE） | 2026-04-29 |
+| 虚拟滚动（CSS content-visibility） | 2026-04-29 |
