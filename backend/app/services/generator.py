@@ -314,6 +314,20 @@ def _dedupe_notes(notes: list[str], cap: int = 16) -> list[str]:
     return out
 
 
+_ipv4_re = re.compile(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$')
+
+
+def _is_valid_ipv4(ip: str) -> bool:
+    """Validate IPv4 address format (0.0.0.0 – 255.255.255.255)."""
+    m = _ipv4_re.match(ip)
+    if not m:
+        return False
+    return all(0 <= int(g) <= 255 for g in m.groups())
+
+
+_VALID_DST_PORTS = {80, 443, 8080, 8443}
+
+
 def _score_format(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     if not records:
         return 0.0, ["无记录可评"]
@@ -333,6 +347,13 @@ def _score_format(records: list[TrafficRecord]) -> tuple[float, list[str]]:
             (r.duration is not None and r.duration >= 0, "duration 缺失或为负"),
             (bool(r.user_agent), "User-Agent 为空"),
             (r.identity_label in {"real", "fake", "anomaly"}, f"身份标签非法: {r.identity_label!r}"),
+            # --- 新增字段合法性检测 ---
+            (_is_valid_ipv4(r.src_ip), f"源IP格式非法: {r.src_ip}"),
+            (_is_valid_ipv4(r.dst_ip), f"目标IP格式非法: {r.dst_ip}"),
+            (1024 <= r.src_port <= 65535, f"源端口超出 ephemeral 范围(1024-65535): {r.src_port}"),
+            (r.dst_port in _VALID_DST_PORTS, f"目标端口非标准服务端口(80/443/8080/8443): {r.dst_port}"),
+            (r.timestamp <= datetime.now(timezone.utc) + timedelta(days=1),
+             f"时间戳不合理(未来时间): {r.timestamp.isoformat()}"),
         ]
         for ok, msg in c:
             checks.append(ok)
@@ -371,12 +392,37 @@ def _score_business(records: list[TrafficRecord], industry: str) -> tuple[float,
         checks.append(get_ok)
         if not get_ok:
             notes.append(f"{prefix}GET 请求不应带 body")
+        # --- 新增: POST/PUT 必须有请求体 ---
+        post_ok = r.method not in {"POST", "PUT"} or r.req_body is not None
+        checks.append(post_ok)
+        if not post_ok:
+            notes.append(f"{prefix}{r.method} 请求不应缺少 body")
+        # --- 新增: DELETE 不应返回 200 且带 body ---
+        if r.method == "DELETE":
+            delete_ok = not (r.status_code == 200 and r.resp_body)
+            checks.append(delete_ok)
+            if not delete_ok:
+                notes.append(f"{prefix}DELETE 成功应为 204(无内容)或 404，不应返回 200 且带 body")
         script_ok = r.identity_label != "fake" or any(
             token in (r.user_agent or "").lower() for token in ("python", "curl", "go", "scrapy", "urllib", "httpx")
         )
         checks.append(script_ok)
         if not script_ok:
             notes.append(f"{prefix}标记为 fake 时 User-Agent 未体现脚本/自动化特征")
+        # --- 新增: anomaly 标签准确性检测 ---
+        if r.identity_label == "anomaly":
+            anomaly_indicators = (
+                r.status_code >= 500,
+                r.status_code == 0,
+                r.rtt is not None and r.rtt > 5000,
+                r.duration is not None and r.duration > 10000,
+                r.src_port < 1024,
+                r.dst_port not in _VALID_DST_PORTS,
+            )
+            anomaly_ok = any(anomaly_indicators)
+            checks.append(anomaly_ok)
+            if not anomaly_ok:
+                notes.append(f"{prefix}标记为 anomaly 但缺少异常特征(5xx/高延迟/非常规端口等)")
         rtt_ok = r.rtt is None or r.rtt >= 0
         checks.append(rtt_ok)
         if not rtt_ok:

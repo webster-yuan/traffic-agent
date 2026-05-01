@@ -4,12 +4,12 @@
 
 ---
 
-## 1. 数据质量深化（中期）
+## 1. 数据质量深化（中期） ✅ — 已落地 2026-04-29
 
-- 字段合法性检测：IP 格式、端口范围、timestamp 合理性
-- 业务一致性检测：POST / 不应该返回空 body，DELETE 应返回特定状态码
-- 异常标签准确性检测：fake/anomaly 是否符合其特征描述
-- Great Expectations / Pandera 集成：结构化数据质量校验流水线
+- ✅ 字段合法性检测：IP 格式、端口范围、timestamp 合理性
+- ✅ 业务一致性检测：POST / PUT 不应缺少 body，DELETE 应返回 204/404
+- ✅ 异常标签准确性检测：anomaly 须有异常特征（5xx/高延迟/非常规端口）
+- ⬜ Great Expectations / Pandera 集成：结构化数据质量校验流水线
 
 ---
 
