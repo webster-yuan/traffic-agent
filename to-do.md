@@ -1,6 +1,6 @@
 # Traffic Agent 后续拓展路线
 
-> **更新**: 2026-05-01 — 前端/后端增强项已全部落地，仅保留远期规划。
+> **更新**: 2026-05-01 — 数据质量深化已全部落地，仅保留平台化远期规划。
 
 ---
 
@@ -9,7 +9,7 @@
 - ✅ 字段合法性检测：IP 格式、端口范围、timestamp 合理性
 - ✅ 业务一致性检测：POST / PUT 不应缺少 body，DELETE 应返回 204/404
 - ✅ 异常标签准确性检测：anomaly 须有异常特征（5xx/高延迟/非常规端口）
-- ⬜ Great Expectations / Pandera 集成：结构化数据质量校验流水线
+- ✅ Pandera 集成：声明式 schema 替代手工 (condition, error_message) 元组，规则自文档化
 
 ---
 

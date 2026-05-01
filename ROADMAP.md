@@ -17,7 +17,7 @@
 | 前端 | 阶段时间线 + 进度可视化 + 取消任务 + 错误重试 | ✅ |
 | 历史 | 高级筛选（关键字/行业/阶段/状态/日期/评分）、下载、删除 | ✅ |
 | 行业 | 11 个行业场景（government ~ gaming）+ 自动场景推断 | ✅ |
-| 质量 | 三维度评分（格式 30% + 业务 40% + 多样性 30%）+ 字段校验（IP/端口/时间戳）+ 业务一致性（POST body/DELETE 状态码）+ 异常标签准确性 | ✅ |
+| 质量 | 三维度评分 + Pandera 声明式 schema（TrafficFormatSchema 13 字段校验 + TrafficBusinessSchema 6 跨字段业务规则）| ✅ |
 | 导出 | CSV / JSON / Parquet 多格式（同会话侧车文件） | ✅ |
 | 报表 | HTML 报表 + ECharts 雷达图/饼图/柱状图 | ✅ |
 | 批量 | 批量生成（最多 10 任务、独立会话、2 秒轮询） | ✅ |
@@ -120,11 +120,12 @@
 3. ~~虚拟滚动（CSS content-visibility + sticky thead）~~ ✅
 4. ~~异步 LLM 调用 + asyncio.wait_for 超时~~ ✅
 5. ~~数据质量深化（字段合法性 + 业务一致性 + 异常标签准确性）~~ ✅
+6. ~~Pandera 结构化校验流水线~~ ✅
 
 **位置**:
-- `backend/app/services/generator.py:317-344` — `_score_format` 新增 IP/端口/时间戳校验
-- `backend/app/services/generator.py:364-418` — `_score_business` 新增 POST body/DELETE 状态码/anomaly 准确性
-- `backend/tests/test_quality_evaluator.py` — 13 个专项测试（+10 新增）
+- `backend/app/services/quality_validator.py` — Pandera schemas（TrafficFormatSchema / TrafficBusinessSchema）
+- `backend/app/services/generator.py:317-324` — `_score_format` / `_score_business` 改为委托 Pandera
+- `backend/tests/test_quality_evaluator.py` — 13 个专项测试全部通过
 
 ### 3.2 下一阶段：环境升级 → Docker
 

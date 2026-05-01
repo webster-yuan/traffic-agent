@@ -15,6 +15,7 @@ from langchain_ollama import ChatOllama
 
 from app.core.config import settings
 from app.models.schemas import QualityScore, Stage, TrafficRecord
+from app.services.quality_validator import validate_business, validate_format
 
 
 def _fix_json(text: str) -> str:
@@ -314,122 +315,14 @@ def _dedupe_notes(notes: list[str], cap: int = 16) -> list[str]:
     return out
 
 
-_ipv4_re = re.compile(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$')
-
-
-def _is_valid_ipv4(ip: str) -> bool:
-    """Validate IPv4 address format (0.0.0.0 – 255.255.255.255)."""
-    m = _ipv4_re.match(ip)
-    if not m:
-        return False
-    return all(0 <= int(g) <= 255 for g in m.groups())
-
-
-_VALID_DST_PORTS = {80, 443, 8080, 8443}
-
-
 def _score_format(records: list[TrafficRecord]) -> tuple[float, list[str]]:
-    if not records:
-        return 0.0, ["无记录可评"]
-
-    notes: list[str] = []
-    checks: list[bool] = []
-    for i, r in enumerate(records):
-        prefix = f"记录 {i + 1}：" if len(records) > 1 else ""
-        c = [
-            (bool(r.id), "id 为空"),
-            (r.method in {"GET", "POST", "PUT", "DELETE"}, f"HTTP 方法不在白名单: {r.method!r}"),
-            (r.url.startswith("https://"), "URL 非 https 开头"),
-            (100 <= r.status_code <= 599, f"状态码不在 100–599: {r.status_code}"),
-            (r.src_port > 0, "源端口无效（需 >0）"),
-            (r.dst_port > 0, "目标端口无效（需 >0）"),
-            (isinstance(r.header, dict), "header 非 JSON 对象"),
-            (r.duration is not None and r.duration >= 0, "duration 缺失或为负"),
-            (bool(r.user_agent), "User-Agent 为空"),
-            (r.identity_label in {"real", "fake", "anomaly"}, f"身份标签非法: {r.identity_label!r}"),
-            # --- 新增字段合法性检测 ---
-            (_is_valid_ipv4(r.src_ip), f"源IP格式非法: {r.src_ip}"),
-            (_is_valid_ipv4(r.dst_ip), f"目标IP格式非法: {r.dst_ip}"),
-            (1024 <= r.src_port <= 65535, f"源端口超出 ephemeral 范围(1024-65535): {r.src_port}"),
-            (r.dst_port in _VALID_DST_PORTS, f"目标端口非标准服务端口(80/443/8080/8443): {r.dst_port}"),
-            (r.timestamp <= datetime.now(timezone.utc) + timedelta(days=1),
-             f"时间戳不合理(未来时间): {r.timestamp.isoformat()}"),
-        ]
-        for ok, msg in c:
-            checks.append(ok)
-            if not ok:
-                notes.append(f"{prefix}{msg}")
-
-    score = round(sum(1 for item in checks if item) / len(checks) * 100, 1)
-    return score, _dedupe_notes(notes)
+    """Pandera-backed format validation → (score, notes)."""
+    return validate_format(records)
 
 
 def _score_business(records: list[TrafficRecord], industry: str) -> tuple[float, list[str]]:
-    if not records:
-        return 0.0, ["无记录可评"]
-
-    known_paths = _industry_paths().get(industry, [])
-    notes: list[str] = []
-    checks: list[bool] = []
-    for i, r in enumerate(records):
-        prefix = f"记录 {i + 1}：" if len(records) > 1 else ""
-        if industry == "custom":
-            ok = r.url.startswith("https://")
-            checks.append(ok)
-            if not ok:
-                notes.append(f"{prefix}行业 custom 时 URL 须为 https 开头")
-        else:
-            ok = f"api.{industry}.com" in r.url
-            checks.append(ok)
-            if not ok:
-                notes.append(f"{prefix}URL 未包含该行业域 api.{industry}.com")
-        if known_paths:
-            path_hit = any(path in r.url for path in known_paths)
-            checks.append(path_hit)
-            if not path_hit:
-                notes.append(f"{prefix}未命中该行业常见路径 {known_paths[:3]}{'…' if len(known_paths) > 3 else ''}")
-        get_ok = r.method != "GET" or r.req_body is None
-        checks.append(get_ok)
-        if not get_ok:
-            notes.append(f"{prefix}GET 请求不应带 body")
-        # --- 新增: POST/PUT 必须有请求体 ---
-        post_ok = r.method not in {"POST", "PUT"} or r.req_body is not None
-        checks.append(post_ok)
-        if not post_ok:
-            notes.append(f"{prefix}{r.method} 请求不应缺少 body")
-        # --- 新增: DELETE 不应返回 200 且带 body ---
-        if r.method == "DELETE":
-            delete_ok = not (r.status_code == 200 and r.resp_body)
-            checks.append(delete_ok)
-            if not delete_ok:
-                notes.append(f"{prefix}DELETE 成功应为 204(无内容)或 404，不应返回 200 且带 body")
-        script_ok = r.identity_label != "fake" or any(
-            token in (r.user_agent or "").lower() for token in ("python", "curl", "go", "scrapy", "urllib", "httpx")
-        )
-        checks.append(script_ok)
-        if not script_ok:
-            notes.append(f"{prefix}标记为 fake 时 User-Agent 未体现脚本/自动化特征")
-        # --- 新增: anomaly 标签准确性检测 ---
-        if r.identity_label == "anomaly":
-            anomaly_indicators = (
-                r.status_code >= 500,
-                r.status_code == 0,
-                r.rtt is not None and r.rtt > 5000,
-                r.duration is not None and r.duration > 10000,
-                r.src_port < 1024,
-                r.dst_port not in _VALID_DST_PORTS,
-            )
-            anomaly_ok = any(anomaly_indicators)
-            checks.append(anomaly_ok)
-            if not anomaly_ok:
-                notes.append(f"{prefix}标记为 anomaly 但缺少异常特征(5xx/高延迟/非常规端口等)")
-        rtt_ok = r.rtt is None or r.rtt >= 0
-        checks.append(rtt_ok)
-        if not rtt_ok:
-            notes.append(f"{prefix}RTT 为负或非法")
-
-    score = round(sum(1 for item in checks if item) / len(checks) * 100, 1)
-    return score, _dedupe_notes(notes)
+    """Pandera-backed business-consistency validation → (score, notes)."""
+    return validate_business(records, industry)
 
 
 def _score_diversity(records: list[TrafficRecord]) -> tuple[float, list[str]]:
