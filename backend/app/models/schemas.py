@@ -19,8 +19,16 @@ class SessionStatus(str, Enum):
     cancelled = "cancelled"
 
 
+Industry = Literal[
+    "government", "ecommerce", "short_video",
+    "ride_hailing", "logistics", "delivery",
+    "finance", "healthcare", "media",
+    "social", "gaming", "custom",
+]
+
+
 class TrafficGenerateRequest(BaseModel):
-    industry: str = Field(..., min_length=1, max_length=64)
+    industry: Industry
     count: int = Field(default=100, ge=1, le=10000)
     stage: Stage = Field(default=Stage.standard)
 
@@ -84,7 +92,7 @@ class SessionSummary(BaseModel):
 
 
 class BatchTaskItem(BaseModel):
-    industry: str = Field(..., min_length=1, max_length=64)
+    industry: Industry
     count: int = Field(default=100, ge=1, le=10000)
     stage: Stage = Field(default=Stage.standard)
 

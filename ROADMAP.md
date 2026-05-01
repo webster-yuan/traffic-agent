@@ -104,18 +104,12 @@ response = llm.invoke(f"{system_prompt}\n\n请生成流量数据")
 **影响**: 用户点击取消后，可能需要等待 10-60 秒才能真正终止。
 **建议**: 短期无法解决（LangGraph 节点的同步 LLM 调用不可中断），记录为已知限制。
 
-### 2.4 industry 字段无枚举校验 🟡
+### 2.4 industry 字段无枚举校验 🟡 → ✅
 
-**位置**: `backend/app/models/schemas.py:23`
+**位置**: `backend/app/models/schemas.py:22`
 
-```python
-class TrafficGenerateRequest(BaseModel):
-    industry: str = Field(..., min_length=1, max_length=64)
-```
-
-**问题**: `industry` 接受任意字符串。输入 `"asdf"` 也能通过校验，但会导致 `infer_scenario()` 返回 `"自定义场景"`、`_industry_context()` 返回默认值，生成质量下降。
-**影响**: 用户体验差，输了错误行业名不会报错。
-**建议**: 改用 `Literal[11个行业名]` 枚举校验。
+**问题**: `industry` 接受任意字符串。
+**状态**: ✅ 已修复（2026-04-29）— 定义 `Industry = Literal[12个行业名]`，Pydantic 自动校验，输入 `"asdf"` 会返回清晰错误。
 
 ### 2.5 同步 /generate 端点阻塞事件循环 🟢
 
@@ -140,8 +134,7 @@ class TrafficGenerateRequest(BaseModel):
 ### 3.1 当前阶段：功能完善（现在）
 
 1. RAG 升级（方案 A：静态示例文件）
-2. industry 枚举校验
-3. 历史筛选服务端化
+2. 历史筛选服务端化
 
 ### 3.2 下一阶段：环境升级 → Docker
 
@@ -186,6 +179,7 @@ class TrafficGenerateRequest(BaseModel):
 - [x] 响应式布局适配
 - [x] 历史分页可用
 - [x] Tab 导航切换
+- [x] industry 枚举校验
 - [ ] RAG 提供真实行业示例
 
 ### 体验

@@ -23,11 +23,7 @@
 - RAG 节点读取对应文件，写入 `retrieved_cases`
 - LLM prompt 中动态注入行业示例
 
-### 2.2 industry 枚举校验 🟡
-
-`TrafficGenerateRequest.industry` 接受任意字符串 → 改为 `Literal` 枚举，前端下拉也联动。
-
-### 2.3 异步 LLM 调用 + 超时 🟡
+### 2.2 异步 LLM 调用 + 超时 🟡
 
 `generate_records_by_llm()` 使用同步 `llm.invoke()` → 改为 `await llm.ainvoke()` + `asyncio.wait_for(timeout=...)`。当前 Ollama 本地调用不需此优化，但为未来远程 API 做准备。
 
