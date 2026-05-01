@@ -73,10 +73,19 @@ npx vite --host 127.0.0.1 --port 5173
 
 **5.1 终止前后端进程：**
 
-```bash
-# 终止 uvicorn 和 node 进程（优选精确 PID）
-taskkill /F /PID <uvicorn_pid> 2>$null
-taskkill /F /PID <node_pid> 2>$null
+> ⚠️ uvicorn `--reload` 会 fork reloader + worker 两个进程，用 PID 单个杀不掉（reloader 会自动重启 worker），必须按镜像名杀进程树。
+
+```powershell
+# 按镜像名终止全部 python 和 node 进程（本机无其他同类服务，安全）
+taskkill /F /IM python.exe 2>$null
+taskkill /F /IM node.exe 2>$null
+```
+
+终止后验证端口已释放：
+
+```powershell
+netstat -ano | Select-String "8000|5173"
+# 无输出 = 端口已释放
 ```
 
 **5.2 删除调试/运行时产生的中间文件：**
@@ -133,7 +142,7 @@ git commit -m "feat(scope): 简洁描述"
 | 2. 实现 | 按 karpathy-guidelines 编码 | 代码审查 |
 | 3. 自测 | 写测试 → 跑测试 | pytest 全绿 |
 | 4. 全链路 | 启动前后端 → Browser Agent | Chrome 验证通过 |
-| 5. 清理 | 终止进程 + 删除中间文件（*.png 等） | 仓库整洁 |
+| 5. 清理 | taskkill /IM 终止进程树 + 删除中间文件 | 端口释放、仓库整洁 |
 | 6. 文档 | 更新 ROADMAP.md / to-do.md | 状态一致 |
 | 7. 汇报 | 等用户批准 | 用户同意 |
 | 8. 提交 | git commit | 提交成功 |
