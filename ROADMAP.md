@@ -1,184 +1,176 @@
-# Traffic Agent 待办事项与路线图
+# Traffic Agent 路线图与下一步指引
 
-**更新日期**: 2026-04-29
-**当前技术栈**: FastAPI + LangGraph + SQLite + Vue 3 + Pinia + Vite + Ollama (本地)
-**环境**: Windows 10 + PowerShell + Ollama (qwen2.5:7b)
+**更新**: 2026-05-01
+**技术栈**: FastAPI + LangGraph + SQLite + Vue 3 + Pinia + Vite + Ollama (qwen2.5:7b)
+**环境**: Windows 10 + PowerShell + Ollama 本地
 
 ---
 
-## 当前项目状态（截至 2026-04-29）
+## 一、项目架构
 
-### 已完成的能力矩阵
+```
+用户浏览器 (Vue 3 + Pinia + Vite)
+    │  SSE Stream / REST API
+    ▼
+FastAPI (uvicorn, port 8000)
+    │
+    ├── routes.py           API 端点（生成/历史/下载/报表/批量）
+    ├── session_service     SQLite CRUD + 批量任务状态
+    ├── generator.py        LLM 调用（async）+ 质量评分 + CSV/JSON/Parquet
+    ├── quality_validator   Pandera 声明式 schema（15 校验规则）
+    ├── report_service      HTML 报表（含 ECharts 图表）
+    │
+    ▼
+LangGraph 工作流（nodes.py + workflow.py）
+    │
+    ├── rag_node          行业场景推断 + 12 套 JSON 示例注入
+    ├── generate_node     async LLM 流量生成（asyncio.wait_for 超时保护）
+    ├── eval_node         三维度质量评分 + Pandera 字段/业务校验
+    └── identity_node     身份标签校验（full 模式）
+        │
+        ▼
+LangSmith Tracing（traceable 装饰器）
+SQLite（traffic_sessions / batch_sessions / batch_tasks）
+```
 
-| 模块 | 功能 | 状态 |
+---
+
+## 二、已完成的能力矩阵
+
+| 模块 | 能力 | 技术要点 |
+|------|------|---------|
+| 生成引擎 | LangGraph 四阶段流水线 | RAG → 生成 → 评估 → 身份校验 |
+| RAG | 12 行业专属示例注入 | `data/examples/*.json`，3 条/行业，注入 system prompt |
+| 异步 LLM | async + 超时保护 | `asyncio.wait_for(llm.ainvoke(), timeout=300)` |
+| 质量评估 | 三维度 + Pandera 声明式校验 | `TrafficFormatSchema`（13 字段）+ `TrafficBusinessSchema`（6 跨字段规则） |
+| 导出 | CSV / JSON / Parquet 多格式 | Parquet 使用 Snappy 压缩，同会话侧车文件 |
+| 报表 | HTML + ECharts 四图表 | 雷达图（质量维度）/ 饼图（方法分布）/ 柱状图（状态码分布） |
+| 批量 | 最多 10 任务并发 | 独立会话 + 2 秒轮询 + `asyncio.Semaphore(3)` |
+| 历史 | 服务端 7 维筛选 + 分页 | SQLite 动态 WHERE，20 条/页 |
+| 前端 UI | Tab 导航 + 虚拟滚动 + 响应式 | CSS Grid + `content-visibility:auto` + 粘性表头 |
+| 测试 | 55 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出 |
+| 清理 | 定期文件清理 | `cleanup_schedule.py`，30 天过期 |
+
+---
+
+## 三、剩余待处理项（按价值排序）
+
+### 3.1 🟡 报表 PDF 导出 — 业务交付刚需
+
+**当前状态**: 报表在新标签打开 HTML，用户手动 Ctrl+P 打印。
+
+**为什么值得做**:
+- 离线分享：发给不接触系统的同事/客户，PDF 是通用格式
+- 会议场景：周报/月报，ECharts 图表嵌入 PDF 直观展示数据质量趋势
+- 合规归档：安全审计需要可追溯的 PDF 质量报告
+
+**技术路径**:
+
+| 方案 | 依赖 | 优点 | 缺点 |
+|------|------|------|------|
+| **WeasyPrint** | `weasyprint` (~5MB) | 纯 Python，轻量，HTML→PDF 一行代码 | ECharts 是 JS 渲染的 SVG，WeasyPrint 不执行 JS，图表会丢失 |
+| **Playwright headless** | `playwright` + Chromium (~150MB) | 完整浏览器渲染，ECharts 截图完美还原 | Chromium 体积大，安装慢；首次渲染有额外延迟 |
+| **后端预渲染静态截图** | 当前 ECharts 数据 → matplotlib/seaborn 静态图 | 无浏览器依赖，PDF 体积小 | 图表美观度不如 ECharts，需要额外维护两套图表代码 |
+
+**推荐**: 如果 PDF 是"偶尔用一两次"，**WeasyPrint**（图表位置显示数据摘要表格）。如果 PDF 是"周报核心交付物"，**Playwright headless** 才能真正还原 ECharts 可视化效果。
+
+---
+
+### 3.2 🟡 取消不能立即中断 LLM — 体验已知限制
+
+**根本原因**: 取消只设置内存标记，但 LLM 调用期间（耗时最长）标记无法被检查。LangGraph 1.x 的 `interrupt()` 是为 human-in-the-loop 设计，不适用于任意取消场景。
+
+**技术约束**: 当前无法在 LangGraph 1.x + syncio 模型下根本解决。升级路径：
+- LangGraph 2.x 可能提供原生取消支持
+- 或迁到 Celery + Redis 后，worker 进程可直接被 SIGTERM 终止
+
+**当前缓解**: 节点入口 `_check_cancelled()` 检查，LLM 返回后立即识别取消。等待时间 = 当前 LLM 调用剩余时长（10-60s）。
+
+---
+
+### 3.3 🟢 移动端适配 — 管理端触达
+
+**当前**: CSS Grid `1fr 400px` 双栏，小屏出现横向滚动。
+
+**技术**: `@media (max-width: 768px)` → 单栏 `grid-template-columns: 1fr`，表单/表格折叠。
+
+**业务价值**: 手机上快速查看生成状态和历史记录，不需要完整交互。
+
+---
+
+### 3.4 🟢 低优先级技术债
+
+| 项目 | 说明 | 建议 |
 |------|------|------|
-| 生成引擎 | LangGraph 四阶段流水线（RAG → 生成 → 评估 → 身份校验） | ✅ |
-| 追踪 | LangSmith Trace 集成 + session_id/thread_id 关联 | ✅ |
-| 前端 | 阶段时间线 + 进度可视化 + 取消任务 + 错误重试 | ✅ |
-| 历史 | 高级筛选（关键字/行业/阶段/状态/日期/评分）、下载、删除 | ✅ |
-| 行业 | 11 个行业场景（government ~ gaming）+ 自动场景推断 | ✅ |
-| 质量 | 三维度评分 + Pandera 声明式 schema（TrafficFormatSchema 13 字段校验 + TrafficBusinessSchema 6 跨字段业务规则）| ✅ |
-| 导出 | CSV / JSON / Parquet 多格式（同会话侧车文件） | ✅ |
-| 报表 | HTML 报表 + ECharts 雷达图/饼图/柱状图 | ✅ |
-| 批量 | 批量生成（最多 10 任务、独立会话、2 秒轮询） | ✅ |
-| 并发 | asyncio.Semaphore(3) 并发控制 + 任务取消 | ✅ |
-| 构建 | Vite 代码分割（vue/pinia 独立 chunk） | ✅ |
-| 数据库 | SQLite threading.local() 连接池 | ✅ |
-| 清理 | 定期文件清理 (cleanup_schedule.py, 30 天) | ✅ |
-| 测试 | 55 个 pytest 测试覆盖核心模块 + 13 个质量评估专项测试 | ✅ |
-
-### 运行约束（非代码问题，不列入后端缺陷）
-
-- 本地 Ollama + qwen2.5:7b 模型能力有限，单条生成 2-5 秒
-- Windows 10 环境，无 Docker
-- 当前阶段聚焦功能完善，性能优化在模型升级后处理
+| `/generate` sync 端点冗余 | 与 `/generate/stream` 逻辑重复 60 行 | 保留兼容，标记 deprecated |
+| `on_event("startup")` 已 deprecated | FastAPI 推荐 lifespan context manager | 下次改 `main.py` 时顺手改 |
+| API 鉴权缺失 | CORS `*`，无 token | Docker 部署时加 API Key / JWT |
 
 ---
 
-## 一、前端问题（需修复）
+## 四、技术演进路线
 
-### 1.1 响应式布局 ✅（2026-04-29）
+### 4.1 下一阶段：Docker 化（需 Windows 11 + Docker Desktop）
 
-### 1.2 历史记录无分页 ✅（2026-04-29）
+**为什么需要这一步**: 当前 SQLite + `asyncio.create_task` 组合在单机单用户场景够用，但存在硬天花板：
+- SQLite 写锁：并发 > 3 任务时写入冲突概率上升
+- 任务无持久化：服务重启丢失所有进行中的任务
+- 无监控：出问题只能看日志，没有面板
 
-### 1.3 历史筛选服务端化 ✅（2026-04-29）
+| 层 | 当前 | Docker 后 | 业务价值 |
+|----|------|-----------|---------|
+| 数据库 | SQLite 文件 | PostgreSQL 容器 | 并发写入无锁，JSONB 存储流量记录支持复杂查询 |
+| 任务队列 | `asyncio.create_task` | Celery + Redis | 任务持久化、失败自动重试、优先级调度 |
+| 缓存 | 无 | Redis | 会话进度缓存，减少 DB 查询 |
+| 对象存储 | 本地 `data/outputs/` | MinIO 容器 | 文件版本管理 + 生命周期自动过期 |
+| 部署 | 手动 `uvicorn` + `vite` | `docker-compose up` | 一键全栈启动 |
+| 监控 | 本地 `error.log` | Prometheus + Grafana | 面板展示吞吐量/延迟/错误率 |
 
-**已实现**: `GET /history` 端点接受 7 个可选筛选参数 (`keyword`/`industry`/`stage`/`status`/`date_from`/`date_to`/`min_quality`)，后端 SQLite 动态 WHERE 查询。前端 `filteredHistory` getter 已移除，筛选变更自动请求服务端并重置分页。
+**迁移步骤**（技术指引）:
+1. 现有 SQL 改为 SQLAlchemy ORM（不改业务逻辑，只换数据访问层）
+2. `docker-compose.yml` 定义 5 个服务（PostgreSQL + Redis + MinIO + backend + frontend）
+3. Celery 替换 `asyncio.create_task`，`routes.py` 中 `create_task()` → `celery_app.send_task()`
+4. Grafana Dashboard 导入预置模板（生成速率 / 质量趋势 / 错误分布）
 
-### 1.4 无虚拟滚动 ✅（2026-04-29）
+### 4.2 远期：平台化
 
-**已实现**: 纯 CSS 方案，无需引入第三方库。`.history-table-wrap` 容器 `max-height:55vh; overflow-y:auto` 限定可视区域，`thead position:sticky; top:0` 粘性表头，`tbody tr content-visibility:auto` 浏览器原生跳过屏外渲染。配合服务端分页（20 条/页），DOM 节点始终受控。
+**前置条件**: Docker 化完成
 
-### 1.5 报表仅支持新标签打开 🟡
-
-**当前问题**: 报表链接 `<a target="_blank">` 在新标签打开 HTML。无法直接导出为 PDF。
-**影响**: 用户需手动 Ctrl+P 打印为 PDF。
-**建议**: 后端加 `?format=pdf` 参数，用 `weasyprint` 或浏览器 headless 生成 PDF。
-
-### 1.6 UI 导航结构单薄 ✅（2026-04-29）
-
----
-
-## 二、后端问题（需修复）
-
-### 2.1 RAG 阶段升级 ✅（2026-04-29）
-
-**方案 A（静态示例）已实现**: `_get_examples(industry)` 从 `data/examples/{industry}.json` 加载行业专属示例，不存在时回退 `custom.json`。12 个行业各有 3 条示例（2 real + 1 fake），注入到 LLM system prompt 的 `参考样例` 字段。
-
-**位置**:
-- `backend/app/services/generator.py:141-149` — `_get_examples(industry)` 读 JSON
-- `backend/app/graph/nodes.py:88-91` — `rag_node` 记录示例来源
-- `backend/data/examples/` — 12 个行业 JSON 文件
-
-### 2.2 LLM 调用异步化 + 超时保护 ✅（2026-05-01）
-
-**已实现**: `generate_records_by_llm()` 改为 `async def`，`llm.invoke()` → `await asyncio.wait_for(llm.ainvoke(), timeout=...)`。`generate_node` 也改为 `async def`。LangGraph 原生支持异步节点，对 `graph.invoke()` 和 `graph.ainvoke()` 均透明。
-
-**位置**:
-- `backend/app/services/generator.py:156-210` — `async def generate_records_by_llm` + `asyncio.wait_for`
-- `backend/app/graph/nodes.py:100-114` — `async def generate_node` + `await generate_records_by_llm`
-
-### 2.3 取消操作不能立即中断 Graph 执行 🟡
-
-**位置**: `backend/app/core/state.py` + `backend/app/graph/nodes.py:23-26`
-
-**问题**: 取消只设置内存标记，Graph 节点在每次 entry 检查 `is_cancelled()`。但如果 LLM 正在 `invoke()`（耗时最长的步骤），取消标志无法被检查到，需要等 LLM 返回。
-**影响**: 用户点击取消后，可能需要等待 10-60 秒才能真正终止。
-**建议**: 短期无法解决（LangGraph 节点的同步 LLM 调用不可中断），记录为已知限制。
-
-### 2.4 industry 字段无枚举校验 🟡 → ✅
-
-**位置**: `backend/app/models/schemas.py:22`
-
-**问题**: `industry` 接受任意字符串。
-**状态**: ✅ 已修复（2026-04-29）— 定义 `Industry = Literal[12个行业名]`，Pydantic 自动校验，输入 `"asdf"` 会返回清晰错误。
-
-### 2.5 同步 /generate 端点阻塞事件循环 🟢
-
-**位置**: `backend/app/api/routes.py:55-108`
-
-**问题**: `POST /generate` 是同步端点，`run_generation_graph()` 直接阻塞整个请求直到 LLM 返回。
-**影响**: 已不推荐使用，前端默认走 `/generate/stream` 流式端点。保留仅用于 API 兼容。
-**建议**: 低优先级，保留或标记为 deprecated。
-
-### 2.6 无 API 鉴权 🟢
-
-**位置**: `backend/app/main.py:9-15`
-
-**问题**: CORS `allow_origins=["*"]`，无任何身份验证。
-**影响**: 纯本地开发无影响。未来部署公网/内网时需要。
-**建议**: 后续 Docker 部署时加 API Key 或 JWT 鉴权。
+| 能力 | 技术 | 业务价值 |
+|------|------|---------|
+| 多模型对比 | 同一场景用 Ollama / 云端 API 分别生成 | 评估不同模型的数据质量和风格偏差 |
+| LangSmith 回归评估 | Dataset + Evaluator 自动评分 | 每次改 prompt / schema 后跑回归，防止退化 |
+| 模板管理 | 行业 → 场景 → 异常模式 三层模板 | 常用场景一键复用，减少重复配置 |
+| Prompt 版本管理 | Git-like prompt 版本 + A/B 测试 | 安全地迭代 prompt，可回滚 |
+| 多用户 + RBAC | JWT 鉴权 + 角色管理 | 团队协作，按角色限制操作 |
+| 定时批量 | Celery Beat + Cron | 每日自动生成 + 自动导出周报 PDF |
 
 ---
 
-## 三、架构演进路线
+## 五、运行约束（非代码缺陷）
 
-### 3.1 当前阶段：功能完善（现在）
+以下问题源于本地 Ollama + qwen2.5:7b 模型能力限制，不是代码问题：
 
-1. ~~RAG 升级（方案 A：静态示例文件）~~ ✅
-2. ~~历史筛选服务端化~~ ✅
-3. ~~虚拟滚动（CSS content-visibility + sticky thead）~~ ✅
-4. ~~异步 LLM 调用 + asyncio.wait_for 超时~~ ✅
-5. ~~数据质量深化（字段合法性 + 业务一致性 + 异常标签准确性）~~ ✅
-6. ~~Pandera 结构化校验流水线~~ ✅
-
-**位置**:
-- `backend/app/services/quality_validator.py` — Pandera schemas（TrafficFormatSchema / TrafficBusinessSchema）
-- `backend/app/services/generator.py:317-324` — `_score_format` / `_score_business` 改为委托 Pandera
-- `backend/tests/test_quality_evaluator.py` — 13 个专项测试全部通过
-
-### 3.2 下一阶段：环境升级 → Docker
-
-**前置条件**: 升级 Windows 11 + 安装 Docker Desktop
-
-| 升级项 | 当前 | Docker 后 |
-|--------|------|-----------|
-| 数据库 | SQLite 文件 | PostgreSQL 容器（持久化 + 并发） |
-| 缓存 | 无 | Redis 容器（任务队列、进度缓存） |
-| 任务队列 | asyncio.create_task | Celery + Redis（持久化任务、失败重试） |
-| 对象存储 | 本地 data/outputs/ | MinIO 容器（版本管理、生命周期） |
-| 部署 | uvicorn --reload 手动启动 | docker-compose up（一键全套） |
-| 日志 | 本地 error.log | ELK / Loki 容器（聚合查询） |
-| 监控 | 无 | Prometheus + Grafana 容器（面板展示） |
-
-### 3.3 远期：平台化
-
-- 多模型对比（Ollama vs 云端 API）
-- LangSmith Dataset 回归评估
-- 模板管理 + Prompt 版本管理
-- 多用户 + RBAC
-- 定时批量生成（Cron Job）
+- LLM 单条生成 2-5s — 模型升级后自然改善
+- 大批量（100+ 条）OOM 风险 — 模型升级 + Celery 任务队列后分流
+- SQLite 并发写锁 — Docker + PostgreSQL 后解决
 
 ---
 
-## 四、当前不处理的项（已明确排除）
+## 六、任务优先级总览
 
-以下问题源于本地 Ollama 模型能力限制，不是代码缺陷，在当前 Windows 10 + 低配模型环境下无需处理：
+```
+当前可做（无需环境升级）:
+  1. 🟡 报表 PDF 导出           ← 最高价值剩余项
+  2. 🟢 移动端 @media 适配       ← 5 分钟 quick win
+  3. 🟢 lifespan → on_event     ← 消除 deprecation warning
 
-- ❌ LLM 生成速度慢（2-5s/条）→ 模型升级后自然解决
-- ❌ 高并发性能瓶颈 → Docker + Celery + PostgreSQL 后解决
-- ❌ 大批量生成（100+ 条）内存 → 模型升级 + 任务队列后解决
-- ❌ SQLite 并发写入锁 → Docker + PostgreSQL 后解决
-- ❌ 日志轮转/生产部署配置 → Docker 化后统一配置
+需要环境升级:
+  4. Windows 11 + Docker Desktop
+  5. SQLAlchemy ORM + PostgreSQL
+  6. Celery + Redis 任务队列
 
----
-
-## 五、成功指标
-
-### 功能
-- [x] 11 行业 + 批量 + 导出 + 报表
-- [x] 响应式布局适配
-- [x] 历史分页可用
-- [x] Tab 导航切换
-- [x] industry 枚举校验
-- [x] RAG 提供真实行业示例
-
-### 体验
-- [x] 流式进度 + 阶段时间线
-- [x] 错误卡片 + 重试
-- [ ] 移动端可用
-
-### 架构
-- [ ] Docker 化部署
-- [ ] PostgreSQL 迁移
-- [ ] Redis 缓存 + Celery 任务队列
+远期:
+  7. 多模型对比 + LangSmith 回归
+  8. 模板 + Prompt 版本管理
+```
