@@ -1,7 +1,7 @@
 # Traffic Agent 待办事项与路线图
 
 **更新日期**: 2026-04-29
-**重点**: 批量生成、HTML 报表导出、Vite 代码分割已完成；下一优先项为 后端性能优化
+**重点**: 批量生成、HTML 报表导出、ECharts 图表集成、Vite 代码分割已完成；下一优先项为 后端性能优化
 
 ---
 
@@ -752,6 +752,7 @@ export async function exportData(
 - [x] 数据导出格式扩展（JSON + Parquet + 下载参数）
 - [x] 批量生成功能
 - [x] HTML 报表导出（含图表和统计）
+- [x] ECharts 图表集成（雷达图、饼图、柱状图）
 - [x] 前端 Vite 代码分割（vue/pinia 独立 chunk）
 - [ ] 后端性能优化
 

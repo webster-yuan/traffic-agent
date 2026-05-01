@@ -39,30 +39,22 @@ def _badge(status: str) -> str:
         f'{status}</span>'
     )
 
-def _bar(label: str, value: float, max_val: float, colour: str = "#3b82f6") -> str:
-    pct = min(value / max_val * 100, 100) if max_val else 0
-    return (
-        f'<div style="margin:6px 0;">'
-        f'<span style="display:inline-block;width:80px;font-size:13px;">{label}</span>'
-        f'<span style="display:inline-block;width:120px;font-size:13px;">{value:.1f}</span>'
-        f'<div style="display:inline-block;width:200px;height:16px;background:#e5e7eb;'
-        f'border-radius:4px;vertical-align:middle;">'
-        f'<div style="width:{pct:.0f}%;height:100%;background:{colour};border-radius:4px;"></div>'
-        f'</div></div>'
-    )
 
-def _dist_bar(label: str, count: int, total: int, colour: str) -> str:
-    pct = count / total * 100 if total else 0
+def _chart_div(chart_id: str, height: int = 300) -> str:
+    return f'<div id="{chart_id}" style="width:100%;height:{height}px;"></div>'
+
+
+def _embed_data(varname: str, data: object) -> str:
+    return f"<script>window.{varname} = {json.dumps(data, ensure_ascii=False)};</script>"
+
+
+def _init_chart(chart_id: str, option_js: str) -> str:
     return (
-        f'<div style="margin:4px 0;">'
-        f'<span style="display:inline-block;width:80px;font-size:13px;">{label}</span>'
-        f'<span style="display:inline-block;width:60px;font-size:13px;">{count} 条</span>'
-        f'<div style="display:inline-block;width:200px;height:16px;background:#e5e7eb;'
-        f'border-radius:4px;vertical-align:middle;">'
-        f'<div style="width:{pct:.0f}%;height:100%;background:{colour};border-radius:4px;"></div>'
-        f'</div>'
-        f'<span style="font-size:12px;margin-left:8px;">{pct:.0f}%</span>'
-        f'</div>'
+        f"<script>document.addEventListener('DOMContentLoaded',function(){{"
+        f"var c=echarts.init(document.getElementById('{chart_id}'));"
+        f"c.setOption({option_js});"
+        f"window.addEventListener('resize',function(){{c.resize();}});"
+        f"}});</script>"
     )
 
 # ---------------------------------------------------------------------------
@@ -131,6 +123,7 @@ def generate_report_html(session_id: str) -> str | None:
         "<!DOCTYPE html>",
         '<html lang="zh-CN"><head><meta charset="UTF-8">',
         "<title>Traffic Agent 生成报告</title>",
+        '<script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>',
         "<style>",
         "*{box-sizing:border-box;margin:0;padding:0;}",
         "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;",
@@ -187,13 +180,23 @@ def generate_report_html(session_id: str) -> str | None:
     # quality detail
     if quality_detail:
         html_parts.append("<h2>质量评估</h2>")
-        html_parts.append(_bar("格式评分", quality_detail.format_score, 100, "#8b5cf6"))
-        html_parts.append(_bar("业务评分", quality_detail.business_score, 100, "#06b6d4"))
-        html_parts.append(_bar("多样性评分", quality_detail.diversity_score, 100, "#10b981"))
-        html_parts.append(_bar("综合评分", quality_detail.total_score, 100,
-                              "#22c55e" if quality_detail.passed else "#ef4444"))
         passed_text = "✅ 通过（≥70）" if quality_detail.passed else "❌ 未通过（<70）"
-        html_parts.append(f'<p style="font-size:13px;margin-top:8px;">{passed_text}</p>')
+        html_parts.append(f'<p style="font-size:13px;margin-bottom:12px;">{passed_text}</p>')
+        html_parts.append(_chart_div("chart-quality", 320))
+        html_parts.append(_init_chart("chart-quality", (
+            "{tooltip:{},radar:{indicator:["
+            "{name:'格式评分',max:100},"
+            "{name:'业务评分',max:100},"
+            "{name:'多样性评分',max:100},"
+            "{name:'综合评分',max:100}"
+            "],shape:'circle',center:['50%','55%'],radius:'65%'},"
+            "series:[{type:'radar',data:[{value:["
+            f"{quality_detail.format_score},"
+            f"{quality_detail.business_score},"
+            f"{quality_detail.diversity_score},"
+            f"{quality_detail.total_score}"
+            "],name:'评分',areaStyle:{opacity:0.3}}]}]}"
+        )))
 
         # dimension notes
         if quality_detail.format_notes:
@@ -215,30 +218,46 @@ def generate_report_html(session_id: str) -> str | None:
     # identity distribution
     if total_records > 0:
         html_parts.append("<h2>身份分布</h2>")
-        html_parts.append(_dist_bar("真实流量", real_cnt, total_records, "#3b82f6"))
-        html_parts.append(_dist_bar("脚本流量", fake_cnt, total_records, "#f59e0b"))
-        html_parts.append(_dist_bar("异常流量", anomaly_cnt, total_records, "#ef4444"))
+        html_parts.append(_chart_div("chart-identity", 280))
+        html_parts.append(_init_chart("chart-identity", (
+            "{tooltip:{trigger:'item'},"
+            "series:[{type:'pie',radius:['45%','70%'],center:['50%','55%'],"
+            "label:{formatter:'{b}\\n{d}%'},"
+            "data:["
+            f"{{value:{real_cnt},name:'真实流量',itemStyle:{{color:'#3b82f6'}}}},"
+            f"{{value:{fake_cnt},name:'脚本流量',itemStyle:{{color:'#f59e0b'}}}},"
+            f"{{value:{anomaly_cnt},name:'异常流量',itemStyle:{{color:'#ef4444'}}}}"
+            "]}]}"
+        )))
 
     # http method distribution
     if method_counter:
         html_parts.append("<h2>HTTP 方法分布</h2>")
-        html_parts.append(_dist_bar("GET", method_counter.get("GET", 0), total_records, "#22c55e"))
-        html_parts.append(_dist_bar("POST", method_counter.get("POST", 0), total_records, "#3b82f6"))
-        html_parts.append(_dist_bar("PUT", method_counter.get("PUT", 0), total_records, "#f59e0b"))
-        html_parts.append(_dist_bar("DELETE", method_counter.get("DELETE", 0), total_records, "#ef4444"))
-        for m, c in method_counter.most_common():
-            if m not in ("GET", "POST", "PUT", "DELETE"):
-                html_parts.append(_dist_bar(m, c, total_records, "#6b7280"))
+        html_parts.append(_chart_div("chart-methods", 250))
+        methods_data = json.dumps([
+            {"name": m, "value": c}
+            for m, c in method_counter.most_common()
+        ], ensure_ascii=False)
+        html_parts.append(_init_chart("chart-methods", (
+            "{tooltip:{trigger:'axis'},"
+            f"xAxis:{{type:'category',data:{json.dumps([m for m,_ in method_counter.most_common()],ensure_ascii=False)}}},"
+            "yAxis:{type:'value'},"
+            f"series:[{{type:'bar',data:{json.dumps([c for _,c in method_counter.most_common()])},barWidth:'40%',"
+            "itemStyle:{color:'#3b82f6',borderRadius:[4,4,0,0]}}}]}"
+        )))
 
     # status code distribution
     if status_counter:
         html_parts.append("<h2>状态码分布</h2>")
-        for code in sorted(status_counter.keys(), key=lambda x: int(x)):
-            c = status_counter[code]
-            colour = "#22c55e" if code.startswith("2") else (
-                "#f59e0b" if code.startswith("3") else "#ef4444"
-            )
-            html_parts.append(_dist_bar(code, c, total_records, colour))
+        html_parts.append(_chart_div("chart-status", 250))
+        codes = sorted(status_counter.keys(), key=lambda x: int(x))
+        html_parts.append(_init_chart("chart-status", (
+            "{tooltip:{trigger:'axis'},"
+            f"xAxis:{{type:'category',data:{json.dumps(codes)}}},"
+            "yAxis:{type:'value'},"
+            f"series:[{{type:'bar',data:{json.dumps([status_counter[c] for c in codes])},barWidth:'40%',"
+            "itemStyle:{color:'#22c55e',borderRadius:[4,4,0,0]}}}]}"
+        )))
 
     # performance
     if rtts:

@@ -141,6 +141,13 @@ def test_report_generates_html_for_completed_session():
     assert "通过" in html
     # footer
     assert "Traffic Agent" in html
+    # echarts CDN
+    assert "echarts.min.js" in html
+    # chart containers
+    assert "chart-quality" in html
+    assert "chart-identity" in html
+    assert "chart-methods" in html
+    assert "chart-status" in html
 
 
 def test_report_includes_error_for_failed_session():
