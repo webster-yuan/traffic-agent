@@ -37,6 +37,8 @@ def build_initial_state(session_id: str, payload: TrafficGenerateRequest) -> dic
         "quality_passed": False,
         "should_retry": False,
         "identity_checked": False,
+        "approval_action": "",
+        "approval_hint": "",
         "error_message": "",
         # Supervisor-Worker orchestration fields
         "messages": [
@@ -149,6 +151,8 @@ async def replay_from_checkpoint(
         "quality_passed": False,
         "should_retry": False,
         "identity_checked": False,
+        "approval_action": "",
+        "approval_hint": "",
         "error_message": "",
         "messages": [
             HumanMessage(

@@ -4,12 +4,14 @@ import time
 import uuid
 import logging
 from pathlib import Path
-from typing import AsyncGenerator, Literal
+from typing import Any, AsyncGenerator, Literal
 
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
 
 from app.models.schemas import (
     BatchGenerateRequest,
@@ -18,9 +20,11 @@ from app.models.schemas import (
     CheckpointItem,
     CheckpointListResponse,
     SessionStatus,
+    Stage,
     TrafficGenerateRequest,
     TrafficGenerateResponse,
     TrafficReplayRequest,
+    TrafficResumeRequest,
 )
 from app.graph.workflow import get_traffic_graph
 from app.services.generator import write_csv, write_traffic_json, write_traffic_parquet
@@ -108,6 +112,20 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             generated_data=records,
             processing_time_ms=int((time.perf_counter() - start_at) * 1000),
         )
+    except GraphInterrupt as gi:
+        # Human-in-the-Loop: graph paused — non-streaming mode cannot handle this
+        # Return a response indicating approval is needed
+        interrupt_data = gi.value if hasattr(gi, 'value') else gi.args[0] if gi.args else {}
+        update_status(session_id, SessionStatus.processing)
+        _release()
+        return TrafficGenerateResponse(
+            success=False,
+            session_id=session_id,
+            total_count=0,
+            quality_score=None,
+            generated_data=[],
+            processing_time_ms=int((time.perf_counter() - start_at) * 1000),
+        )
     except Exception as e:
         fail_session(session_id, str(e))
         raise
@@ -147,12 +165,14 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 "generate": "流量生成",
                 "eval": "质量评估",
                 "identity": "身份校验",
+                "approval": "人工审核",
             }
             stage_progress_map = {
                 "rag": 25,
                 "generate": 60,
                 "eval": 82,
                 "identity": 92,
+                "approval": 95,
             }
             seen_start: set[str] = set()
             stage_started_at: dict[str, float] = {}
@@ -208,6 +228,23 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 # ── mode == "updates" — node output (replaces on_chain_end) ──
                 # data is a dict like {"supervisor": {...}} — iterate over entries
                 for node_name, state_update in data.items():
+
+                    # ── HITL: detect interrupt in stream ────────────────────
+                    # LangGraph's astream() suppresses GraphInterrupt and emits
+                    # {"__interrupt__": (Interrupt(value=...),)} as an updates event.
+                    if node_name == "__interrupt__":
+                        interrupt_data_raw = state_update
+                        # state_update is tuple of Interrupt objects
+                        if interrupt_data_raw and len(interrupt_data_raw) > 0:
+                            first = interrupt_data_raw[0]
+                            interrupt_payload = getattr(first, 'value', first)
+                            logger.info(f"session_id={session_id} HITL interrupt detected in stream: {interrupt_payload}")
+                            update_status(session_id, SessionStatus.processing)
+                            yield (
+                                "event: waiting_for_approval\n"
+                                f"data: {json.dumps(interrupt_payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                            )
+                        return  # exit stream — client will resume via POST /resume
 
                     # ── Supervisor decision extraction ────────────────────
                     if node_name == "supervisor":
@@ -324,6 +361,15 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 f"data: {{\"download_url\":\"/api/v1/traffic/download/{session_id}\"}}\n\n"
             )
             yield "event: complete\ndata: {\"success\":true}\n\n"
+        except GraphInterrupt as gi:
+            # Human-in-the-Loop: graph paused for approval
+            interrupt_data = gi.value if hasattr(gi, 'value') else gi.args[0] if gi.args else {}
+            logger.info(f"session_id={session_id} HITL interrupt: {interrupt_data}")
+            update_status(session_id, SessionStatus.processing)  # still processing, waiting for human
+            yield (
+                "event: waiting_for_approval\n"
+                f"data: {json.dumps(interrupt_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            )
         except Exception as e:
             logger.exception(f"session_id={session_id} 发生异常: {e}")
             fail_session(session_id, str(e))
@@ -341,6 +387,87 @@ async def cancel_generate(session_id: str) -> dict[str, str | bool]:
     add_cancelled(session_id)
     update_status(session_id, SessionStatus.cancelled)
     return {"success": True, "session_id": session_id, "message": "任务已终止"}
+
+
+@router.post("/resume/{session_id}")
+async def resume_generate(
+    session_id: str,
+    payload: TrafficResumeRequest,
+) -> dict[str, Any]:
+    """Resume a HITL-paused graph with the human's decision.
+
+    Called by the frontend after the user clicks Approve or Reject.
+    Uses ``Command(resume=...)`` to feed the decision back into
+    the ``interrupt()`` call inside ``approval_worker``.
+    """
+    await _acquire()
+    try:
+        graph = get_traffic_graph()
+        thread_id = f"traffic_{session_id}"
+        config = {"configurable": {"thread_id": thread_id}}
+
+        decision = {"action": payload.action, "hint": payload.hint}
+        logger.info(
+            "session_id=%s resume with decision: %s",
+            session_id, decision,
+        )
+
+        # Resume the graph from the interrupt point
+        result = await graph.ainvoke(
+            Command(resume=decision),
+            config=config,
+        )
+
+        # Process final results (same logic as normal completion)
+        quality = result.get("quality_score")
+        records = result.get("generated_records", [])
+        scenario = result.get("scenario", "")
+
+        if quality and records:
+            file_path = write_csv(session_id, records, result.get("industry", ""))
+            write_traffic_json(
+                session_id, records, result.get("industry", ""),
+                scenario=scenario, quality=quality,
+                stage=result.get("stage", Stage.standard),
+            )
+            write_traffic_parquet(session_id, records, result.get("industry", ""))
+            complete_session(
+                session_id=session_id,
+                scenario=scenario,
+                record_count=len(records),
+                file_path=file_path,
+                quality=quality,
+            )
+            return {
+                "success": True,
+                "session_id": session_id,
+                "download_url": f"/api/v1/traffic/download/{session_id}",
+                "record_count": len(records),
+            }
+
+        # If quality missing, the graph may have been interrupted again (re-generate case)
+        return {
+            "success": False,
+            "session_id": session_id,
+            "message": "Graph did not complete — may need re-approval",
+        }
+
+    except GraphInterrupt as gi:
+        # The graph was interrupted again (e.g., after re-generate → re-approval)
+        interrupt_data = gi.value if hasattr(gi, 'value') else gi.args[0] if gi.args else {}
+        logger.info(f"session_id={session_id} re-interrupted for approval: {interrupt_data}")
+        return {
+            "success": False,
+            "session_id": session_id,
+            "status": "pending_approval",
+            "interrupt": interrupt_data,
+        }
+    except Exception as e:
+        logger.exception(f"session_id={session_id} resume failed: {e}")
+        fail_session(session_id, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _release()
 
 
 # ---------------------------------------------------------------------------

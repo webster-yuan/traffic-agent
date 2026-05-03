@@ -14,7 +14,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 from app.core.state import is_cancelled
 from app.graph.generate_subgraph import build_generate_subgraph
@@ -161,6 +161,8 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
         goto="supervisor",
         update={
             "generated_records": records,
+            "approval_action": "",  # reset after reject → regenerate
+            "approval_hint": "",    # reset stale feedback
             "messages": [msg],
         },
     )
@@ -260,6 +262,96 @@ async def identity_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
         goto="supervisor",
         update={
             "identity_checked": checked,
+            "messages": [msg],
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Approval Worker (Human-in-the-Loop)
+# ---------------------------------------------------------------------------
+
+async def approval_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ignore[type-arg]
+    """Pause execution and wait for human approval of generated records.
+
+    Uses LangGraph's ``interrupt()`` to suspend the graph.  The graph
+    resumes when the frontend calls ``POST /resume/{session_id}`` with
+    ``{"action": "approve" | "reject", "hint": "..."}``.
+    """
+    session_id: str = state.get("session_id", "")  # type: ignore[assignment]
+    _check_cancelled(session_id)
+
+    # ── Custom streaming: stage start ──────────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "stage_start",
+            "node": "approval",
+            "name": "人工审核",
+            "message": "等待人工审核生成的流量数据",
+        })
+    except RuntimeError:
+        pass
+
+    records: list[TrafficRecord] = state.get("generated_records", []) or []  # type: ignore[assignment]
+    quality = state.get("quality_score")
+    scenario: str = state.get("scenario", "")  # type: ignore[assignment]
+
+    # Build a summary for the reviewer
+    real_count = sum(1 for r in records if r.identity_label == "real")
+    fake_count = sum(1 for r in records if r.identity_label == "fake")
+    anomaly_count = sum(1 for r in records if r.identity_label == "anomaly")
+    total_score = getattr(quality, "total_score", 0) if quality else 0
+
+    sample_records = []
+    for r in records[:3]:
+        sample_records.append({
+            "method": r.method,
+            "url": r.url,
+            "status_code": r.status_code,
+            "identity_label": r.identity_label,
+        })
+
+    interrupt_payload = {
+        "type": "approval_required",
+        "session_id": session_id,
+        "scenario": scenario,
+        "record_count": len(records),
+        "real_count": real_count,
+        "fake_count": fake_count,
+        "anomaly_count": anomaly_count,
+        "quality_score": total_score,
+        "sample_records": sample_records,
+    }
+
+    logger.info("[Approval Worker] session=%s waiting for human approval (%d records, score=%.1f)",
+                session_id, len(records), total_score)
+
+    # ── HITL: pause and wait for human decision ────────────────────────
+    decision: dict[str, Any] = interrupt(interrupt_payload)  # type: ignore[assignment]
+
+    action: str = decision.get("action", "reject")
+    hint: str = decision.get("hint", "")
+
+    logger.info("[Approval Worker] session=%s human decision: %s (hint=%s)",
+                session_id, action, hint[:80] if hint else "")
+
+    if action == "approve":
+        msg = HumanMessage(
+            content="人工审核通过",
+            name="approval",
+        )
+    else:
+        msg = HumanMessage(
+            content=f"人工审核驳回: {hint}" if hint else "人工审核驳回",
+            name="approval",
+        )
+
+    return Command(
+        goto="supervisor",
+        update={
+            "approval_action": action,
+            "approval_hint": hint,
             "messages": [msg],
         },
     )

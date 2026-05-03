@@ -21,12 +21,14 @@ FastAPI (uvicorn, port 8000)
     ├── report_service      HTML 报表（含 ECharts 图表）
     │
     ▼
-LangGraph 工作流（nodes.py + workflow.py）
+LangGraph 工作流（supervisor.py + workers.py + workflow.py）
     │
-    ├── rag_node          行业场景推断 + 12 套 JSON 示例注入
-    ├── generate_node     async LLM 流量生成（asyncio.wait_for 超时保护）
-    ├── eval_node         三维度质量评分 + Pandera 字段/业务校验
-    └── identity_node     身份标签校验（full 模式）
+    ├── supervisor_node    LLM 驱动的主控路由器（RouterDecision 结构化输出）
+    ├── rag_worker         行业场景推断 + 12 套 JSON 示例注入
+    ├── generate_worker    async LLM 流量生成（嵌套子图）
+    ├── eval_worker        三维度质量评分 + Pandera 字段/业务校验
+    ├── approval_worker    Human-in-the-Loop 中断审批（interrupt()）
+    └── identity_worker    身份标签校验（full 模式）
         │
         ▼
 LangSmith Tracing（traceable 装饰器）
@@ -48,9 +50,12 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 批量 | 最多 10 任务并发 | 独立会话 + 2 秒轮询 + `asyncio.Semaphore(3)` |
 | 历史 | 服务端 7 维筛选 + 分页 | SQLite 动态 WHERE，20 条/页 |
 | 前端 UI | Tab 导航 + 虚拟滚动 + 响应式 | CSS Grid + `content-visibility:auto` + 粘性表头 |
-| 测试 | 61 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出/回放 |
+| 测试 | 62 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出/回放 |
 | 清理 | 定期文件清理 | `cleanup_schedule.py`，30 天过期 |
 | 检查点回放 | 任意节点状态回放 | `aget_state_history()` + Fork Replay，支持 hint override |
+| **Supervisor-Worker** | **多智能体编排引擎** | LLM 驱动 Supervisor 动态路由 + RAG/Generate/Eval/Identity/Approval 五 Worker |
+| **Custom Streaming** | **SSE 阶段流 + 思考链** | `stream_mode=["updates","custom"]` + `get_stream_writer()` 实时推送阶段/思考事件 |
+| **Human-in-the-Loop** | **人工审核中断放行** | LangGraph `interrupt()` 暂停图 + `POST /resume` 恢复 + 前端审批面板 |
 
 ---
 
@@ -77,19 +82,24 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 ---
 
-### 3.2 🟡 取消不能立即中断 LLM — 体验已知限制
+### 3.2 ✅ Human-in-the-Loop 人工审批 — 已实现
 
-**根本原因**: 取消只设置内存标记，但 LLM 调用期间（耗时最长）标记无法被检查。LangGraph 1.x 的 `interrupt()` 是为 human-in-the-loop 设计，不适用于任意取消场景。
+**实现**: LangGraph `interrupt()` 在 `approval_worker` 中暂停图执行，前端通过 SSE `waiting_for_approval` 事件展示审批面板（统计摘要 + 样例记录），用户 Approve/Reject 后调用 `POST /resume/{session_id}` 恢复执行。
 
-**技术约束**: 当前无法在 LangGraph 1.x + syncio 模型下根本解决。升级路径：
-- LangGraph 2.x 可能提供原生取消支持
-- 或迁到 Celery + Redis 后，worker 进程可直接被 SIGTERM 终止
+**关键修复**:
+- LangGraph `astream()` 压制 `GraphInterrupt` 并以 `updates` 事件 `{"__interrupt__": ...}` 形式抛出 → SSE handler 检测 `__interrupt__` 并发射 `waiting_for_approval`
+- Supervisor 增加 LLM 前确定性路由检查，确保审批节点不被 LLM 跳过
+- Reject → regenerate 循环通过 `generate_worker` 重置 `approval_action` 避免无限循环
+
+### 3.3 🟡 取消不能立即中断 LLM — 体验已知限制
+
+**根本原因**: 取消只设置内存标记，但 LLM 调用期间（耗时最长）标记无法被检查。当前 `interrupt()` 已用于 HITL 审批，不适用于任意取消场景。
 
 **当前缓解**: 节点入口 `_check_cancelled()` 检查，LLM 返回后立即识别取消。等待时间 = 当前 LLM 调用剩余时长（10-60s）。
 
 ---
 
-### 3.3 🟢 移动端适配 — 管理端触达
+### 3.4 🟢 移动端适配 — 管理端触达
 
 **当前**: CSS Grid `1fr 400px` 双栏，小屏出现横向滚动。
 
@@ -99,7 +109,7 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 ---
 
-### 3.4 🟢 低优先级技术债
+### 3.5 🟢 低优先级技术债
 
 | 项目 | 说明 | 建议 |
 |------|------|------|
@@ -158,15 +168,25 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 ---
 
-## 六、LangGraph Agent 深度提升（待实施）
+## 六、LangGraph Agent 深度提升
 
-以下 3 项从 LangGraph 能力深度出发，无需环境升级即可实施：
+以下 3 项从 LangGraph 能力深度出发：
 
-| # | 任务 | 说明 | 改动量 |
-|---|------|------|--------|
-| 🟡 1 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 |
-| 🟡 2 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 |
-| 🟢 3 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 |
+| # | 任务 | 说明 | 改动量 | 状态 |
+|---|------|------|--------|------|
+| 🟡 1 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 | 待实施 |
+| 🟡 2 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 | 待实施 |
+| 🟢 3 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 | 待实施 |
+
+### 6.1 ✅ 已完成的 LangGraph 深度能力
+
+| # | 任务 | 核心技术点 |
+|---|------|-----------|
+| 1 | **Supervisor-Worker 多智能体架构** | LLM 结构化输出 (`RouterDecision`) + `Send()` 并行扇出 + Generate 子图嵌套 |
+| 2 | **Custom Streaming 思考链** | `stream_mode=["updates","custom"]` + `get_stream_writer()` + SSE 阶段/进度/思考事件 |
+| 3 | **Human-in-the-Loop 审批** | LangGraph `interrupt()` 动态中断 + `graph.ainvoke(Command(resume=...))` 恢复 + 前端审批面板 |
+| 4 | **检查点回放 (Time Travel)** | `aget_state_history()` + Fork Replay + hint override 参数注入 |
+| 5 | **AsyncSqliteSaver 持久化** | SQLite 异步 checkpoint + `thread_id` 指针管理 + 跨会话状态恢复 |
 
 ---
 

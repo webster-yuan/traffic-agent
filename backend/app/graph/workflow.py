@@ -19,13 +19,14 @@ from app.core.config import settings
 from app.graph.state import GraphState
 from app.graph.supervisor import route_supervisor, supervisor_node
 from app.graph.workers import (
+    approval_worker,
     eval_worker,
     generate_worker,
     identity_worker,
     rag_worker,
 )
 
-_WORKERS = ("rag", "generate", "eval", "identity")
+_WORKERS = ("rag", "generate", "eval", "identity", "approval")
 
 
 def _build_graph() -> StateGraph:
@@ -47,6 +48,7 @@ def _build_graph() -> StateGraph:
     builder.add_node("generate", generate_worker)
     builder.add_node("eval", eval_worker)
     builder.add_node("identity", identity_worker)
+    builder.add_node("approval", approval_worker)
 
     # -- edges ---------------------------------------------------------------
     builder.add_edge(START, "supervisor")
@@ -60,6 +62,7 @@ def _build_graph() -> StateGraph:
             "generate": "generate",
             "eval": "eval",
             "identity": "identity",
+            "approval": "approval",
             "__end__": END,
             "FINISH": END,
             "__parallel__": END,  # fallback; Send() handles the real dispatch

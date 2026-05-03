@@ -8,6 +8,7 @@ const store = useTrafficStore()
 const industry = ref('ride_hailing')
 const stage = ref<Stage>('standard')
 const count = ref(100)
+const rejectHint = ref('')
 
 async function onSubmit() {
   await store.startGenerate({
@@ -77,6 +78,74 @@ function stageStatusText(status: string) {
         重试上次请求
       </button>
     </div>
+
+    <!-- P2.2 Human-in-the-Loop: Approval Panel -->
+    <div v-if="store.approvalData && store.approvalWaiting" class="approval-card">
+      <div class="approval-header">
+        <span>👤 人工审核</span>
+        <span class="approval-badge">等待中</span>
+      </div>
+      <div class="approval-summary">
+        <div class="approval-stat">
+          <strong>{{ store.approvalData.record_count }}</strong>
+          <span>总记录</span>
+        </div>
+        <div class="approval-stat">
+          <strong>{{ store.approvalData.real_count }}</strong>
+          <span>真实流量</span>
+        </div>
+        <div class="approval-stat">
+          <strong>{{ store.approvalData.fake_count }}</strong>
+          <span>脚本流量</span>
+        </div>
+        <div class="approval-stat">
+          <strong>{{ store.approvalData.anomaly_count }}</strong>
+          <span>异常流量</span>
+        </div>
+        <div class="approval-stat">
+          <strong>{{ store.approvalData.quality_score.toFixed(1) }}</strong>
+          <span>质量分数</span>
+        </div>
+      </div>
+      <div v-if="store.approvalData.sample_records.length" class="approval-samples">
+        <div class="sample-title">样例记录 (前 {{ store.approvalData.sample_records.length }} 条)</div>
+        <div
+          v-for="(rec, idx) in store.approvalData.sample_records"
+          :key="idx"
+          class="sample-row"
+        >
+          <code>{{ rec.method }} {{ rec.status_code }}</code>
+          <span class="sample-url">{{ rec.url }}</span>
+          <span class="sample-label" :class="rec.identity_label">{{ rec.identity_label }}</span>
+        </div>
+      </div>
+      <div class="approval-actions">
+        <label class="reject-hint-label">
+          驳回原因（可选）
+          <input
+            v-model="rejectHint"
+            type="text"
+            placeholder="例如：业务类型不匹配、数据格式有误..."
+            class="reject-hint-input"
+          />
+        </label>
+        <div class="approval-buttons">
+          <button class="approve-btn" @click="store.approveGeneration()">
+            ✅ 通过
+          </button>
+          <button
+            class="reject-btn"
+            @click="store.rejectGeneration(rejectHint); rejectHint = ''"
+          >
+            ❌ 驳回（重新生成）
+          </button>
+        </div>
+      </div>
+      <div v-if="store.approvalError" class="approval-error">
+        {{ store.approvalError }}
+      </div>
+    </div>
+
     <div class="stage-timeline">
       <div
         v-for="step in store.stageSteps"

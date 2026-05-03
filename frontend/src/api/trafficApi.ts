@@ -171,6 +171,50 @@ export type GenerateProgress = {
   timeout?: number
 }
 
+// P2.2 Human-in-the-Loop: approval required interrupt payload
+export type ApprovalRequired = {
+  type: 'approval_required'
+  session_id: string
+  scenario: string
+  record_count: number
+  real_count: number
+  fake_count: number
+  anomaly_count: number
+  quality_score: number
+  sample_records: Array<{
+    method: string
+    url: string
+    status_code: number
+    identity_label: string
+  }>
+}
+
+export type ResumeAction = 'approve' | 'reject'
+
+export async function resumeGeneration(
+  sessionId: string,
+  action: ResumeAction,
+  hint?: string
+): Promise<{
+  success: boolean
+  session_id: string
+  download_url?: string
+  record_count?: number
+  status?: string
+  interrupt?: ApprovalRequired
+  message?: string
+}> {
+  const res = await fetch(`${API_BASE}/resume/${sessionId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, hint: hint ?? '' }),
+  })
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json()
+}
+
 export function generateTrafficStream(
   payload: GeneratePayload,
   onStart: (sessionId: string) => void,
@@ -184,6 +228,7 @@ export function generateTrafficStream(
   onThoughtDecision?: (decision: ThoughtDecision) => void,
   onThoughtToken?: (data: { node: string; content: string }) => void,
   onGenerateProgress?: (progress: GenerateProgress) => void,
+  onWaitingForApproval?: (data: ApprovalRequired) => void,
   signal?: AbortSignal
 ) {
   fetch(`${API_BASE}/generate/stream`, {
@@ -235,6 +280,10 @@ export function generateTrafficStream(
               break
             case 'generate_progress':
               onGenerateProgress?.(data)
+              break
+            case 'waiting_for_approval':
+              streamFinished = true
+              onWaitingForApproval?.(data as ApprovalRequired)
               break
             case 'finalize':
               onFinalize(data)

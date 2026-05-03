@@ -33,6 +33,12 @@ class TrafficGenerateRequest(BaseModel):
     stage: Stage = Field(default=Stage.standard)
 
 
+class TrafficResumeRequest(BaseModel):
+    """Request to resume a HITL-paused graph."""
+    action: Literal["approve", "reject"]
+    hint: str = Field(default="", description="Feedback hint when rejecting")
+
+
 class QualityScore(BaseModel):
     format_score: float
     business_score: float
@@ -161,7 +167,7 @@ class GenerationHint(BaseModel):
 class RouterDecision(BaseModel):
     """Supervisor routing decision."""
 
-    next: Literal["rag", "generate", "eval", "identity", "FINISH"] = Field(
+    next: Literal["rag", "generate", "eval", "identity", "approval", "FINISH"] = Field(
         description="Next worker to invoke, or FINISH to end"
     )
     reason: str = Field(description="Why this worker was chosen (Chinese, ≤50 chars)")

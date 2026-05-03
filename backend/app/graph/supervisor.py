@@ -25,7 +25,7 @@ from app.models.schemas import RouterDecision, Stage
 
 logger = logging.getLogger(__name__)
 
-_WORKER_NAMES = Literal["rag", "generate", "eval", "identity", "__end__"]
+_WORKER_NAMES = Literal["rag", "generate", "eval", "identity", "approval", "__end__"]
 
 
 def _make_send_state(state: GraphState, worker: str) -> dict[str, Any]:
@@ -49,6 +49,8 @@ def _make_send_state(state: GraphState, worker: str) -> dict[str, Any]:
         "quality_passed": state.get("quality_passed", False),
         "should_retry": state.get("should_retry", False),
         "identity_checked": state.get("identity_checked", False),
+        "approval_action": state.get("approval_action", ""),
+        "approval_hint": state.get("approval_hint", ""),
         "error_message": state.get("error_message", ""),
         "next_worker": worker,
     }
@@ -60,6 +62,7 @@ _SYSTEM_PROMPT = """你是 Traffic Agent 系统的 Supervisor（主控代理）�
 - rag      — 检索行业流量案例和推断场景（首次必执行）
 - generate — 调用 LLM 生成流量记录
 - eval     — 对生成的流量进行质量评分（格式/业务/多样性）
+- approval — 等待人工审核（质量评估通过后）
 - identity — 身份标签校验（全量模式）
 - FINISH   — 所有任务完成，结束流程
 
@@ -68,7 +71,9 @@ _SYSTEM_PROMPT = """你是 Traffic Agent 系统的 Supervisor（主控代理）�
 2. rag 完成后，generated_records 为空时 → 调用 generate
 3. generate 完成后 → 调用 eval
 4. eval 后：
-   - 如果 quality_passed=true → 判断是否需要 identity
+   - 如果 quality_passed=true 且 approval_action 为空 → 调用 approval
+   - 如果 quality_passed=true 且 approval_action=approve → FINISH
+   - 如果 quality_passed=true 且 approval_action=reject → 调用 generate（重新生成）
    - 如果 should_retry=true → 调用 generate（重新生成）
    - 如果 should_retry=false 且 quality_passed=false → 调用 FINISH（放弃重试）
 5. identity_checked=true 或 stage != full → FINISH
@@ -129,6 +134,57 @@ async def supervisor_node(
             goto="__parallel__",
             update={
                 "next_worker": "__parallel__",
+                "messages": [ai_msg],
+            },
+        )
+
+    # --- Deterministic approval routing (HITL) ------------------------------
+    # Bypass LLM for approval-related decisions to ensure the HITL loop is
+    # reliable.  The LLM may incorrectly skip the approval node.
+    approval_action: str = state.get("approval_action", "")  # type: ignore[assignment]
+    quality_passed: bool = state.get("quality_passed", False)  # type: ignore[assignment]
+
+    # Case 1: After eval / eval+identity — quality passes, not yet reviewed.
+    if (
+        len(generated_records) > 0
+        and quality_score is not None
+        and quality_score.total_score > 0
+        and quality_passed
+        and not approval_action
+    ):
+        logger.info("[Supervisor] deterministic: quality passed → approval")
+        ai_msg = AIMessage(
+            content="[Supervisor] → approval: 质量评估通过，等待人工审核",
+            name="supervisor",
+        )
+        return Command(
+            goto="approval",
+            update={
+                "next_worker": "approval",
+                "messages": [ai_msg],
+            },
+        )
+
+    # Case 2: After a prior approval decision (approve / reject).
+    # Use the deterministic fallback to decide the next step.
+    if approval_action:
+        decision = _fallback_route(state)
+        next_worker = decision.next
+        if next_worker == "FINISH":
+            next_worker = "__end__"
+        logger.info(
+            "[Supervisor] deterministic post-approval: %s → %s (reason: %s)",
+            session_id, next_worker, decision.reason,
+        )
+        ai_msg = AIMessage(
+            content=f"[Supervisor] → {decision.next}: {decision.reason}",
+            name="supervisor",
+            additional_kwargs={"decision_next": decision.next, "decision_reason": decision.reason},
+        )
+        return Command(
+            goto=next_worker,  # type: ignore[arg-type]
+            update={
+                "next_worker": next_worker,
                 "messages": [ai_msg],
             },
         )
@@ -245,6 +301,7 @@ def _fallback_route(state: GraphState) -> RouterDecision:
     should_retry: bool = state.get("should_retry", False)  # type: ignore[assignment]
     quality_passed: bool = state.get("quality_passed", False)  # type: ignore[assignment]
     identity_checked: bool = state.get("identity_checked", False)  # type: ignore[assignment]
+    approval_action: str = state.get("approval_action", "")  # type: ignore[assignment]
     error_msg: str = state.get("error_message", "")  # type: ignore[assignment]
 
     if error_msg:
@@ -266,13 +323,20 @@ def _fallback_route(state: GraphState) -> RouterDecision:
     if not quality_passed:
         return RouterDecision(next="FINISH", reason="已达最大重试次数，放弃")
 
-    # Check if identity is needed
-    stage = state.get("stage")
-    stage_value = getattr(stage, "value", str(stage)) if stage is not None else ""
-    if stage_value == "full" and not identity_checked:
-        return RouterDecision(next="identity", reason="全量模式，执行身份校验")
+    # Quality passed — check approval status
+    if approval_action == "approve":
+        # Already approved — may still need identity check
+        stage = state.get("stage")
+        stage_value = getattr(stage, "value", str(stage)) if stage is not None else ""
+        if stage_value == "full" and not identity_checked:
+            return RouterDecision(next="identity", reason="全量模式，执行身份校验")
+        return RouterDecision(next="FINISH", reason="审核已通过，所有步骤完成")
 
-    return RouterDecision(next="FINISH", reason="所有步骤完成")
+    if approval_action == "reject":
+        return RouterDecision(next="generate", reason="审核驳回，根据反馈重新生成")
+
+    # No approval action yet — route to approval for human review
+    return RouterDecision(next="approval", reason="质量评估通过，等待人工审核")
 
 
 def route_supervisor(

@@ -8,7 +8,9 @@ import {
   langsmithTraceUrl,
   listHistory,
   reportUrl,
+  resumeGeneration,
   startBatch,
+  type ApprovalRequired,
   type BatchTaskItem,
   type BatchTaskStatus,
   type GeneratePayload,
@@ -54,7 +56,7 @@ type StageStep = {
   retry?: number
 }
 
-const STAGE_ORDER = ['rag', 'generate', 'eval', 'identity']
+const STAGE_ORDER = ['rag', 'generate', 'eval', 'identity', 'approval']
 
 function createStageSteps(): StageStep[] {
   return STAGE_ORDER.map((stage) => ({
@@ -101,6 +103,11 @@ export const useTrafficStore = defineStore('traffic', {
     batchId: '',
     batchTasks: [] as BatchTaskStatus[],
     batchRunning: false,
+    // P2.2 Human-in-the-Loop: approval state
+    approvalData: null as ApprovalRequired | null,
+    approvalWaiting: false,
+    approvalResult: null as string | null,
+    approvalError: '',
   }),
   getters: {
   },
@@ -179,6 +186,9 @@ export const useTrafficStore = defineStore('traffic', {
       this.downloadPath = ''
       this.thoughts = []
       this.thoughtSeq = 0
+      this.approvalData = null
+      this.approvalWaiting = false
+      this.approvalError = ''
       this.abortController?.abort()
       this.abortController = new AbortController()
 
@@ -245,6 +255,16 @@ export const useTrafficStore = defineStore('traffic', {
                 : '📝'
           addThought(`${icon} ${progress.message}`)
         },
+        (approvalData: ApprovalRequired) => {
+          // HITL: graph paused, waiting for human approval
+          this.approvalData = approvalData
+          this.approvalWaiting = true
+          this.running = false
+          this.progressText = '等待人工审核...'
+          this.markStageStart({ stage: 'approval', name: '人工审核', progress: 95 })
+          this.abortController = null
+          addThought(`👤 等待人工审核 — ${approvalData.record_count} 条记录，质量分数 ${approvalData.quality_score}`)
+        },
         this.abortController.signal
       )
     },
@@ -261,6 +281,86 @@ export const useTrafficStore = defineStore('traffic', {
       this.progressText = '任务已取消'
       this.errorMessage = ''
       this.abortController = null
+      this.approvalWaiting = false
+    },
+    async approveGeneration() {
+      if (!this.sessionId || !this.approvalWaiting) return
+      this.approvalWaiting = false
+      this.running = true
+      this.approvalError = ''
+      this.markStageComplete({ stage: 'approval', status: 'success', progress: 95 })
+      try {
+        const result = await resumeGeneration(this.sessionId, 'approve')
+        if (result.success) {
+          this.progress = 100
+          this.progressText = '审核通过，生成完成'
+          this.downloadPath = result.download_url ?? ''
+          this.resultMessage = `下载链接: ${result.download_url}`
+          this.running = false
+          this.approvalData = null
+          this.refreshHistory()
+        } else if (result.status === 'pending_approval' && result.interrupt) {
+          // Re-approval needed (re-generate → re-eval → re-approval)
+          this.approvalData = result.interrupt
+          this.approvalWaiting = true
+          this.running = false
+          this.progressText = '等待重新审核...'
+          this.markStageStart({ stage: 'approval', name: '人工审核', progress: 95 })
+          // Add thought about re-approval
+          this.thoughtSeq++
+          this.thoughts.push({
+            id: this.thoughtSeq,
+            text: `👤 重新生成完成，等待再次审核 — ${result.interrupt.record_count} 条记录`,
+            ts: Date.now(),
+          })
+        } else {
+          this.errorMessage = result.message ?? '审核失败'
+          this.running = false
+        }
+      } catch (e: unknown) {
+        this.approvalError = e instanceof Error ? e.message : String(e)
+        this.running = false
+      }
+    },
+    async rejectGeneration(hint: string) {
+      if (!this.sessionId || !this.approvalWaiting) return
+      this.approvalWaiting = false
+      this.running = true
+      this.approvalError = ''
+      try {
+        const result = await resumeGeneration(this.sessionId, 'reject', hint)
+        if (result.success) {
+          this.progress = 100
+          this.progressText = '审核驳回，但生成完成'
+          this.running = false
+          this.approvalData = null
+          this.refreshHistory()
+        } else if (result.status === 'pending_approval' && result.interrupt) {
+          // Re-approval needed
+          this.approvalData = result.interrupt
+          this.approvalWaiting = true
+          this.running = false
+          this.progressText = '等待重新审核...'
+          this.markStageStart({ stage: 'approval', name: '人工审核', progress: 95 })
+          this.thoughtSeq++
+          this.thoughts.push({
+            id: this.thoughtSeq,
+            text: `👤 重新生成完成，等待再次审核 — ${result.interrupt.record_count} 条记录`,
+            ts: Date.now(),
+          })
+        } else {
+          this.errorMessage = result.message ?? '驳回失败'
+          this.running = false
+        }
+      } catch (e: unknown) {
+        this.approvalError = e instanceof Error ? e.message : String(e)
+        this.running = false
+      }
+    },
+    dismissApproval() {
+      this.approvalData = null
+      this.approvalWaiting = false
+      this.approvalError = ''
     },
     async removeHistory(sessionId: string) {
       await deleteHistory(sessionId)

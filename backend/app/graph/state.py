@@ -28,6 +28,9 @@ class GraphState(TypedDict):
     quality_passed: bool
     should_retry: bool
     identity_checked: bool
+    # --- Human-in-the-Loop approval fields ---
+    approval_action: str  # "approve" | "reject" | ""
+    approval_hint: str    # user feedback when rejecting
     error_message: str
     # --- Supervisor-Worker orchestration fields ---
     messages: Annotated[list[BaseMessage], operator.add]
