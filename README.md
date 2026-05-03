@@ -4,14 +4,17 @@
 
 ## 项目简介
 
-Traffic Agent 是一个全栈 AI 应用，结合 LangGraph、FastAPI 和 Vue 3，使用本地大语言模型（Ollama + Qwen2.5 7B）生成高质量的模拟网络流量数据。系统采用四阶段流水线（RAG → 生成 → 评估 → 身份校验），支持 SSE 流式进度、ECharts 可视化报表、批量生成、7 维度历史筛选、CSV/JSON/Parquet 多格式导出。
+Traffic Agent 是一个全栈 AI 应用，结合 LangGraph、FastAPI 和 Vue 3，使用本地大语言模型（Ollama + Qwen2.5 7B）生成高质量的模拟网络流量数据。系统采用 **Supervisor-Worker 多智能体架构**（RAG → 生成 → 评估 → 身份校验），支持 Send() 并行扇出、子图嵌套、SSE 流式思考链、ECharts 可视化报表、批量生成、7 维度历史筛选、CSV/JSON/Parquet 多格式导出。
+
+> 📖 **Agent 技术深度文档**: 见 [docs/Agent核心技术落地.md](docs/Agent核心技术落地.md) — 涵盖 Supervisor-Worker 架构、结构化输出、并行扇出、子图嵌套、流式思考链、检查点持久化等核心技术落地要点。
 
 ## 核心特性
 
+- **Supervisor-Worker 多智能体**: LangGraph StateGraph + 结构化输出 RouterDecision + Send() 并行扇出 + 子图嵌套
 - **AI 驱动**: Ollama + Qwen2.5 7B 本地模型，异步调用 + asyncio.wait_for 超时保护
 - **RAG 增强**: 12 个行业静态示例 JSON 注入 LLM system prompt，提升生成质量
-- **四阶段流水线**: RAG（场景推断 + 示例检索）→ 生成（异步 LLM）→ 评估（三维度评分）→ 身份校验
-- **质量评分**: 格式（30%）+ 业务（40%）+ 多样性（30%），附带扣分说明，未通过自动重试
+- **Agent 思考链**: SSE 实时推送 Supervisor 决策原因 + LLM 推理活动，前端滚动日志展示
+- **质量评分**: 格式（30%）+ 业务（40%）+ 多样性（30%），Pandera 声明式校验，未通过自动重试
 - **ECharts 报表**: HTML 报表含雷达图（质量评分）、饼图（身份分布）、柱状图（HTTP 方法/状态码）
 - **批量生成**: 最多 10 任务并发，asyncio.Semaphore(3) 并发控制，2 秒轮询进度
 - **历史管理**: 7 维度服务端筛选（关键字/行业/阶段/状态/日期/评分），分页 + CSS 虚拟滚动
@@ -163,6 +166,7 @@ traffic-agent/
 │   ├── package.json
 │   └── vite.config.ts                 # Vite 8 + 代码分割
 └── docs/
+    ├── Agent核心技术落地.md    ← Agent 架构技术深度文档
     ├── 开发设计文档_v1.0.md
     ├── 流量字段枚举.md
     └── 项目需求文档_v1.0.md
@@ -170,22 +174,34 @@ traffic-agent/
 
 ## 工作流架构
 
-### 四阶段流水线
+### Supervisor-Worker 多智能体
 
 ```
-START
-  ↓
-[rag] ← 场景推断 + 静态 JSON 示例检索
-  ↓
-[generate] ← 异步 LLM 生成 (ainvoke + asyncio.wait_for 超时)
-  ↓
-[eval] ← 三维度质量评分 (格式 30% + 业务 40% + 多样性 30%)
-  ↓
-  ├─ 未通过 → retry → [generate] (最多重试 N 次)
-  └─ 通过 → [identity] ← 身份校验 (仅 full 模式)
-              ↓
-             END
+START → Supervisor (LLM 决策中心)
+           │
+           ├──→ RAG Worker    (行业检索 + 场景推断) ─┐
+           ├──→ Generate Worker (子图: prompt→LLM→parse) ─┤
+           ├──→ Eval Worker   (Pandera 三维度评分) ─┤
+           ├──→ Identity Worker (身份标签校验) ──────┤
+           │                                         │
+           └── Send() 并行扇出 (full 模式)            │
+                ├── eval    ────────────┐             │
+                └── identity ───────────┘             │
+                                                     ▼
+                                              Supervisor ←──┘
+                                                  │
+                                             END / 重试
 ```
+
+**Supervisor 路由规则**:
+1. `retrieved_cases` 为空 → RAG
+2. RAG 完成、无记录 → Generate
+3. 生成完成 → Eval
+4. 质量未通过 + 未达上限 → 重试 Generate
+5. 质量通过 + full 模式 → Identity
+6. 全部完成 → END
+
+> 详见 [docs/Agent核心技术落地.md](docs/Agent核心技术落地.md) 获取完整技术细节。
 
 ### 质量评分标准
 

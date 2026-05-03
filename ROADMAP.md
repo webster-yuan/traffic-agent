@@ -157,20 +157,37 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 ---
 
-## 六、任务优先级总览
+## 六、LangGraph Agent 深度提升（待实施）
+
+以下 4 项从 LangGraph 能力深度出发，无需环境升级即可实施，按价值排序：
+
+| # | 任务 | 说明 | 改动量 |
+|---|------|------|--------|
+| 🔴 1 | **Checkpoint Replay / Time Travel** | 已有 `AsyncSqliteSaver` 持久化检查点，加 API 端点支持从任意节点回放。前端加"重放"按钮，回退到 generate 前换 prompt 重试 | ~80 行 |
+| 🟡 2 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 |
+| 🟡 3 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 |
+| 🟢 4 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 |
+
+---
+
+## 七、任务优先级总览
 
 ```
 当前可做（无需环境升级）:
-  1. 🟡 报表 PDF 导出           ← 最高价值剩余项
-  2. 🟢 移动端 @media 适配       ← 5 分钟 quick win
-  3. 🟢 lifespan → on_event     ← 消除 deprecation warning
+  1. 🟡 报表 PDF 导出                   ← 业务交付最高价值
+  2. 🔴 Checkpoint Replay / Time Travel  ← LangGraph 深度展示
+  3. 🟡 真 RAG 向量检索 (ChromaDB)       ← 知识库自进化
+  4. 🟡 质量重试硬上限 + 降级策略          ← 修复已知问题
+  5. 🟢 Prompt 自优化反馈闭环             ← 模型能力增强
+  6. 🟢 移动端 @media 适配               ← 5 分钟 quick win
+  7. 🟢 lifespan → on_event             ← 消除 deprecation warning
 
 需要环境升级:
-  4. Windows 11 + Docker Desktop
-  5. SQLAlchemy ORM + PostgreSQL
-  6. Celery + Redis 任务队列
+  8. Windows 11 + Docker Desktop
+  9. SQLAlchemy ORM + PostgreSQL
+ 10. Celery + Redis 任务队列
 
 远期:
-  7. 多模型对比 + LangSmith 回归
-  8. 模板 + Prompt 版本管理
+ 11. 多模型对比 + LangSmith 回归
+ 12. 模板 + Prompt 版本管理
 ```
