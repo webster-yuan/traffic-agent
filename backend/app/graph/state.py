@@ -1,9 +1,20 @@
-from typing import TypedDict
+import operator
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import BaseMessage
 
 from app.models.schemas import QualityScore, Stage, TrafficRecord
 
 
 class GraphState(TypedDict):
+    """Unified state for Supervisor-Worker agent graph.
+
+    All original traffic-generation fields are preserved for backward
+    compatibility.  The two new fields ``messages`` (accumulated conversation
+    history) and ``next_worker`` (supervisor routing decision) enable the
+    Supervisor → Worker orchestration pattern.
+    """
+
     session_id: str
     industry: str
     stage: Stage
@@ -18,3 +29,6 @@ class GraphState(TypedDict):
     should_retry: bool
     identity_checked: bool
     error_message: str
+    # --- Supervisor-Worker orchestration fields ---
+    messages: Annotated[list[BaseMessage], operator.add]
+    next_worker: str

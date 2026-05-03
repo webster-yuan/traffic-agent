@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -116,3 +116,52 @@ class BatchStatusResponse(BaseModel):
     batch_id: str
     tasks: list[BatchTaskStatus]
     finished: bool
+
+
+# ---------------------------------------------------------------------------
+# Structured output models (P1.3 — with_structured_output)
+# ---------------------------------------------------------------------------
+
+class TrafficRecordItem(BaseModel):
+    """Single traffic record for structured LLM generation output."""
+
+    id: str = Field(description="UUID format string")
+    method: Literal["GET", "POST", "PUT", "DELETE"] = Field(description="HTTP method")
+    url: str = Field(description="Complete HTTPS URL matching industry domain")
+    status_code: int = Field(ge=100, le=599, description="HTTP status code")
+    timestamp: str = Field(description="ISO-8601 timestamp")
+    src_ip: str = Field(description="Client IP, 192.168.x.x format")
+    src_port: int = Field(ge=1024, le=65535, description="Ephemeral source port")
+    dst_ip: str = Field(description="Server IP, 10.0.x.x format")
+    dst_port: int = Field(description="Service port: 80/443/8080/8443")
+    header: dict = Field(description="HTTP request headers as JSON object")
+    req_body: Optional[dict] = Field(default=None, description="Request body, null for GET/DELETE")
+    resp_body: Optional[dict] = Field(default=None, description="Response body")
+    rtt: Optional[float] = Field(default=None, ge=0, description="Round-trip time in ms")
+    duration: Optional[float] = Field(default=None, ge=0, description="Request duration in ms")
+    user_agent: Optional[str] = Field(default=None, description="User-Agent header string")
+    referer: Optional[str] = Field(default=None, description="Referer header")
+    identity_label: Literal["real", "fake", "anomaly"] = Field(
+        description="Identity: real=browser, fake=script, anomaly=attack"
+    )
+
+
+class TrafficGenerationOutput(BaseModel):
+    """Structured output wrapper for LLM traffic generation."""
+
+    records: list[TrafficRecordItem] = Field(description="Generated traffic records")
+
+
+class GenerationHint(BaseModel):
+    """Structured hint from LLM for generation strategy."""
+
+    strategy: str = Field(description="One-sentence generation strategy (≤30 Chinese chars)")
+
+
+class RouterDecision(BaseModel):
+    """Supervisor routing decision."""
+
+    next: Literal["rag", "generate", "eval", "identity", "FINISH"] = Field(
+        description="Next worker to invoke, or FINISH to end"
+    )
+    reason: str = Field(description="Why this worker was chosen (Chinese, ≤50 chars)")

@@ -2,7 +2,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -45,19 +45,20 @@ class TestRoutes(unittest.TestCase):
             passed=True,
         )
         with patch(
-            "app.api.routes.run_generation_graph",
-            lambda session_id, payload: {
-                "scenario": "通勤高峰",
-                "quality_score": quality,
-                "generated_records": [rec],
-            },
-        ), patch("app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"), patch(
+            "app.api.routes.run_graph",
+            new_callable=AsyncMock,
+        ) as mock_run_graph, patch("app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"), patch(
             "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
         ), patch(
             "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
         ), patch(
             "app.api.routes.create_session", lambda *args, **kwargs: None
         ):
+            mock_run_graph.return_value = {
+                "scenario": "通勤高峰",
+                "quality_score": quality,
+                "generated_records": [rec],
+            }
             resp = self.client.post(
                 "/api/v1/traffic/generate",
                 json={"industry": "ride_hailing", "count": 1, "stage": "standard"},

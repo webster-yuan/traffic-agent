@@ -21,7 +21,7 @@ from app.models.schemas import (
 )
 from app.graph.workflow import get_traffic_graph
 from app.services.generator import write_csv, write_traffic_json, write_traffic_parquet
-from app.services.graph_runner import build_initial_state, run_generation_graph, run_generation_graph_async
+from app.services.graph_runner import build_initial_state, run_generation_graph_async as run_graph
 from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
     add_batch_task,
@@ -72,7 +72,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
         trace_metadata=graph_config["metadata"],
     )
     try:
-        graph_result = run_generation_graph(session_id=session_id, payload=payload)
+        graph_result = await run_graph(session_id=session_id, payload=payload)
         scenario = graph_result["scenario"]
         quality = graph_result["quality_score"]
         records = graph_result["generated_records"]
@@ -242,7 +242,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             # 检查最终状态
             if final_state is None:
                 logger.warning(f"session_id={session_id} 事件流未获取到最终状态，回退同步调用")
-                final_state = run_generation_graph(session_id=session_id, payload=payload)
+                final_state = await run_graph(session_id=session_id, payload=payload)
                 logger.info(f"session_id={session_id} 同步调用完成，获取到最终状态")
 
             # 处理最终结果
@@ -423,7 +423,7 @@ async def _run_single_task(
         )
         update_batch_task_status(batch_id, task_index, "processing")
 
-        graph_result = await run_generation_graph_async(session_id=session_id, payload=payload)
+        graph_result = await run_graph(session_id=session_id, payload=payload)
         scenario = graph_result["scenario"]
         quality = graph_result["quality_score"]
         records = graph_result["generated_records"]
