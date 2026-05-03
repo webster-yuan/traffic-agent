@@ -50,7 +50,7 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 批量 | 最多 10 任务并发 | 独立会话 + 2 秒轮询 + `asyncio.Semaphore(3)` |
 | 历史 | 服务端 7 维筛选 + 分页 | SQLite 动态 WHERE，20 条/页 |
 | 前端 UI | Tab 导航 + 虚拟滚动 + 响应式 | CSS Grid + `content-visibility:auto` + 粘性表头 |
-| 测试 | 62 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出/回放 |
+| 测试 | 66 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出/回放 |
 | 清理 | 定期文件清理 | `cleanup_schedule.py`，30 天过期 |
 | 检查点回放 | 任意节点状态回放 | `aget_state_history()` + Fork Replay，支持 hint override |
 | **Supervisor-Worker** | **多智能体编排引擎** | LLM 驱动 Supervisor 动态路由 + RAG/Generate/Eval/Identity/Approval 五 Worker |
@@ -174,14 +174,15 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 | # | 任务 | 说明 | 改动量 | 状态 |
 |---|------|------|--------|------|
-| 🟡 1 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 | 待实施 |
-| 🟡 2 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 | 待实施 |
-| 🟢 3 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 | 待实施 |
+| 🟡 1 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 | 📋 待办（暂缓） |
+| 🟡 2 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 | 📋 待办（暂缓） |
+| 🟢 3 | **Prompt 自优化反馈闭环 ✅** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 | ✅ 已完成 |
 
 ### 6.1 ✅ 已完成的 LangGraph 深度能力
 
 | # | 任务 | 核心技术点 |
 |---|------|-----------|
+| 6 | **Prompt 自优化反馈闭环** | eval 失败 → `eval_feedback` → generate subgraph `prepare_prompt_node` 注入改进指引 → 自我校正 |
 | 1 | **Supervisor-Worker 多智能体架构** | LLM 结构化输出 (`RouterDecision`) + `Send()` 并行扇出 + Generate 子图嵌套 |
 | 2 | **Custom Streaming 思考链** | `stream_mode=["updates","custom"]` + `get_stream_writer()` + SSE 阶段/进度/思考事件 |
 | 3 | **Human-in-the-Loop 审批** | LangGraph `interrupt()` 动态中断 + `graph.ainvoke(Command(resume=...))` 恢复 + 前端审批面板 |
@@ -195,11 +196,17 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 ```
 当前可做（无需环境升级）:
   1. 🟡 报表 PDF 导出                   ← 业务交付最高价值
-  2. 🟡 真 RAG 向量检索 (ChromaDB)       ← 知识库自进化
-  3. 🟡 质量重试硬上限 + 降级策略          ← 修复已知问题
-  4. 🟢 Prompt 自优化反馈闭环             ← 模型能力增强
-  5. 🟢 移动端 @media 适配               ← 5 分钟 quick win
-  6. 🟢 lifespan → on_event             ← 消除 deprecation warning
+  2. 🟢 移动端 @media 适配              ← 5 分钟 quick win
+  3. 🟢 lifespan → on_event            ← 消除 deprecation warning
+
+📋 已确认，近期不做:
+  4. 🟡 真 RAG 向量检索 (ChromaDB)
+  5. 🟡 质量重试硬上限 + 降级策略
+
+✅ 已完成:
+  6. 🟢 Prompt 自优化反馈闭环 ✅
+  7. 🟡 Human-in-the-Loop 人工审批 ✅
+  8. 🟡 Custom Streaming 思考链 ✅
 
 需要环境升级:
   7. Windows 11 + Docker Desktop

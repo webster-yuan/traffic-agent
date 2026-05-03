@@ -31,6 +31,8 @@ class GraphState(TypedDict):
     # --- Human-in-the-Loop approval fields ---
     approval_action: str  # "approve" | "reject" | ""
     approval_hint: str    # user feedback when rejecting
+    # --- Prompt self-optimization feedback ---
+    eval_feedback: str    # aggregated failure notes from eval, fed back to generate
     error_message: str
     # --- Supervisor-Worker orchestration fields ---
     messages: Annotated[list[BaseMessage], operator.add]

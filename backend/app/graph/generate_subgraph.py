@@ -53,6 +53,8 @@ class GenerateSubState(TypedDict, total=False):
     raw_response: str
     records: list[TrafficRecord]
     error: str
+    # --- prompt self-optimization (P3.7) ---
+    eval_feedback: str  # failure notes from previous eval, injected into prompt
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +75,16 @@ def _fix_json(text: str) -> str:
 
 
 async def prepare_prompt_node(state: GenerateSubState) -> dict[str, Any]:
-    """Build the LLM prompt from industry metadata and examples."""
+    """Build the LLM prompt from industry metadata and examples.
+
+    When ``eval_feedback`` is present (injected by the parent supervisor
+    after a quality failure), appends actionable improvement guidance
+    to the prompt — forming a self-optimization feedback loop (P3.7).
+    """
     industry: str = state.get("industry", "")  # type: ignore[assignment]
     scenario: str = state.get("scenario", "")  # type: ignore[assignment]
     count: int = state.get("count", 10)  # type: ignore[assignment]
+    eval_feedback: str = state.get("eval_feedback", "")  # type: ignore[assignment]
 
     examples = _get_examples(industry)
     examples_str = "\n".join([json.dumps(e, ensure_ascii=False) for e in examples])
@@ -127,6 +135,21 @@ async def prepare_prompt_node(state: GenerateSubState) -> dict[str, Any]:
 
 参考样例:
 {examples_str}"""
+
+    # ── P3.7 Prompt self-optimization: inject previous eval feedback ──
+    if eval_feedback:
+        feedback_section = f"""
+
+## ⚠️ 上一轮质量反馈（请针对性改进下列问题后再生成）
+
+{eval_feedback}
+
+请特别注意上述问题，确保本轮生成的数据在格式、业务逻辑和多样性方面均有显著改善。"""
+        prompt += feedback_section
+        logger.info(
+            "[GenerateSub] injected eval feedback (%d chars) into prompt",
+            len(eval_feedback),
+        )
 
     logger.info("[GenerateSub] prompt prepared: industry=%s, count=%d, chars=%d",
                 industry, count, len(prompt))

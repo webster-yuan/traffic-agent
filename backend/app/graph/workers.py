@@ -127,6 +127,7 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
         "raw_response": "",
         "records": [],
         "error": "",
+        "eval_feedback": state.get("eval_feedback", ""),  # P3.7 self-optimization
     }
 
     subgraph = build_generate_subgraph()
@@ -200,6 +201,21 @@ async def eval_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ig
     passed = quality.passed
     should_retry = (not passed) and (retries < max_retries)
 
+    # ── Build self-optimization feedback (P3.7) ─────────────────────────
+    # When quality fails, aggregate dimension notes into a concise,
+    # actionable feedback string for the generate worker to consume.
+    eval_feedback = ""
+    if not passed:
+        parts: list[str] = []
+        if quality.format_notes:
+            parts.append("● 格式问题: " + "; ".join(quality.format_notes[:3]))
+        if quality.business_notes:
+            parts.append("● 业务问题: " + "; ".join(quality.business_notes[:3]))
+        if quality.diversity_notes:
+            parts.append("● 多样性问题: " + "; ".join(quality.diversity_notes[:3]))
+        eval_feedback = "\n".join(parts)
+        logger.info("[Eval Worker] feedback for generate: %s", eval_feedback[:120])
+
     status_text = "通过" if passed else f"未通过(第{retries + 1}次)"
     msg = HumanMessage(
         content=f"质量评估: {status_text}, 总分={quality.total_score}",
@@ -213,6 +229,7 @@ async def eval_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ig
             "quality_passed": passed,
             "should_retry": should_retry,
             "retries": retries + 1 if should_retry else retries,
+            "eval_feedback": eval_feedback,
             "messages": [msg],
         },
     )

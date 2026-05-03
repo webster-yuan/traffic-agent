@@ -39,6 +39,7 @@ def build_initial_state(session_id: str, payload: TrafficGenerateRequest) -> dic
         "identity_checked": False,
         "approval_action": "",
         "approval_hint": "",
+        "eval_feedback": "",  # P3.7 self-optimization loop
         "error_message": "",
         # Supervisor-Worker orchestration fields
         "messages": [
