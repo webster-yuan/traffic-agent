@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.core.config import settings
 from app.graph.state import GraphState
-from app.graph.supervisor import supervisor_node
+from app.graph.supervisor import route_supervisor, supervisor_node
 from app.graph.workers import (
     eval_worker,
     generate_worker,
@@ -51,8 +51,22 @@ def _build_graph() -> StateGraph:
     # -- edges ---------------------------------------------------------------
     builder.add_edge(START, "supervisor")
 
+    # Supervisor → workers via conditional routing (supports Send() fan-out).
+    builder.add_conditional_edges(
+        "supervisor",
+        route_supervisor,
+        {
+            "rag": "rag",
+            "generate": "generate",
+            "eval": "eval",
+            "identity": "identity",
+            "__end__": END,
+            "FINISH": END,
+            "__parallel__": END,  # fallback; Send() handles the real dispatch
+        },
+    )
+
     # Workers always return to supervisor via Command(goto="supervisor").
-    # Static edges serve as fallback documentation.
     for name in _WORKERS:
         builder.add_edge(name, "supervisor")
 

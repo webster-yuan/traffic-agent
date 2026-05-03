@@ -2,6 +2,11 @@
 
 The supervisor examines the current state (messages, industry, scenario,
 quality results, retry count) and decides which worker should act next.
+
+Supports two routing modes:
+- Sequential: ``Command(goto="<worker>")`` — single next worker
+- Parallel: ``[Send("eval", ...), Send("identity", ...)]`` — fan-out when
+  eval and identity can run concurrently (full stage, after generation).
 """
 
 from __future__ import annotations
@@ -11,15 +16,41 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
-from langgraph.types import Command
+from langgraph.types import Command, Send
 
 from app.core.config import settings
 from app.graph.state import GraphState
-from app.models.schemas import RouterDecision
+from app.models.schemas import RouterDecision, Stage
 
 logger = logging.getLogger(__name__)
 
 _WORKER_NAMES = Literal["rag", "generate", "eval", "identity", "__end__"]
+
+
+def _make_send_state(state: GraphState, worker: str) -> dict[str, Any]:
+    """Build a minimal-but-complete state payload for ``Send()`` parallel dispatch.
+
+    Workers read from state via ``.get()`` with defaults, so we only need to
+    include fields the workers actually consume.  ``messages`` is omitted
+    because the supervisor's ``AIMessage`` is attached separately.
+    """
+    return {
+        "session_id": state.get("session_id", ""),
+        "industry": state.get("industry", ""),
+        "stage": state.get("stage"),
+        "count": state.get("count", 0),
+        "scenario": state.get("scenario", ""),
+        "retries": state.get("retries", 0),
+        "max_retries": state.get("max_retries", 3),
+        "retrieved_cases": state.get("retrieved_cases", []),
+        "generated_records": state.get("generated_records", []),
+        "quality_score": state.get("quality_score"),
+        "quality_passed": state.get("quality_passed", False),
+        "should_retry": state.get("should_retry", False),
+        "identity_checked": state.get("identity_checked", False),
+        "error_message": state.get("error_message", ""),
+        "next_worker": worker,
+    }
 
 _SYSTEM_PROMPT = """你是 Traffic Agent 系统的 Supervisor（主控代理）。你的职责是根据当前系统状态，
 决定下一个应该执行的 Worker。
@@ -45,11 +76,51 @@ _SYSTEM_PROMPT = """你是 Traffic Agent 系统的 Supervisor（主控代理）�
 请返回 JSON 格式：{"next": "<worker>", "reason": "<决策原因>"}"""
 
 
-async def supervisor_node(state: GraphState) -> Command[Any]:  # type: ignore[type-arg]
-    """Decide the next worker based on current state."""
+async def supervisor_node(
+    state: GraphState,
+) -> Command[Any]:  # type: ignore[type-arg]
+    """Decide the next worker based on current state.
+
+    Sets ``next_worker`` to ``__parallel__`` when eval+identity should
+    fan out concurrently (full stage, after generation).  The actual
+    ``Send()`` dispatch is performed by :func:`route_supervisor`.
+    """
 
     session_id: str = state.get("session_id", "")  # type: ignore[assignment]
     industry: str = state.get("industry", "")  # type: ignore[assignment]
+
+    # --- Check for parallel dispatch opportunity (P2.3) -------------------
+    # In full stage, eval and identity are independent — fan them out.
+    stage = state.get("stage")
+    stage_value = getattr(stage, "value", str(stage)) if stage is not None else ""
+    generated_records = state.get("generated_records", []) or []
+    quality_score = state.get("quality_score")
+    identity_checked: bool = state.get("identity_checked", False)  # type: ignore[assignment]
+
+    if (
+        stage_value == "full"
+        and len(generated_records) > 0
+        and quality_score is not None
+        and quality_score.total_score == 0  # initial placeholder, not yet evaluated
+        and not identity_checked
+    ):
+        logger.info(
+            "[Supervisor] parallel fan-out: eval + identity (full stage, %d records)",
+            len(generated_records),
+        )
+        ai_msg = AIMessage(
+            content="[Supervisor] → 并行派发 eval + identity",
+            name="supervisor",
+        )
+        return Command(
+            goto="__parallel__",
+            update={
+                "next_worker": "__parallel__",
+                "messages": [ai_msg],
+            },
+        )
+
+    # --- Standard LLM-driven routing ---------------------------------------
 
     messages: list = list(state.get("messages", []) or [])  # type: ignore[assignment]
     system = SystemMessage(content=_SYSTEM_PROMPT)
@@ -122,7 +193,7 @@ async def supervisor_node(state: GraphState) -> Command[Any]:  # type: ignore[ty
     return Command(
         goto=next_worker,  # type: ignore[arg-type]
         update={
-            "next_worker": decision.next,
+            "next_worker": next_worker,
             "messages": [ai_msg],
         },
     )
@@ -147,7 +218,8 @@ def _fallback_route(state: GraphState) -> RouterDecision:
     if generated_count == 0:
         return RouterDecision(next="generate", reason="案例就绪，开始生成流量")
 
-    if quality_score is None:
+    # Initial placeholder (total_score=0) or None — not yet evaluated
+    if quality_score is None or quality_score.total_score == 0:
         return RouterDecision(next="eval", reason="流量已生成，开始质量评估")
 
     if should_retry:
@@ -163,3 +235,28 @@ def _fallback_route(state: GraphState) -> RouterDecision:
         return RouterDecision(next="identity", reason="全量模式，执行身份校验")
 
     return RouterDecision(next="FINISH", reason="所有步骤完成")
+
+
+def route_supervisor(
+    state: GraphState,
+) -> str | list[Send]:
+    """Conditional-edge routing function for the supervisor node (P2.3).
+
+    LangGraph requires ``Send()`` objects to be returned from a routing
+    function (used with ``add_conditional_edges``), not from a node.
+
+    When the supervisor sets ``next_worker == "__parallel__"``, this
+    function fans out to eval + identity concurrently.  Otherwise it
+    returns the worker name as a plain string.
+    """
+    next_worker: str = state.get("next_worker", "")  # type: ignore[assignment]
+
+    if next_worker == "__parallel__":
+        logger.info("[Route] parallel fan-out → [eval, identity]")
+        return [
+            Send("eval", _make_send_state(state, "eval")),
+            Send("identity", _make_send_state(state, "identity")),
+        ]
+
+    logger.info("[Route] sequential → %s", next_worker)
+    return next_worker

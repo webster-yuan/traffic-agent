@@ -16,12 +16,12 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from app.core.state import is_cancelled
+from app.graph.generate_subgraph import build_generate_subgraph
 from app.graph.state import GraphState
 from app.models.schemas import QualityScore, Stage, TrafficRecord
 from app.services.generator import (
     _get_examples,
     evaluate_quality,
-    generate_records_by_llm,
     infer_scenario,
 )
 
@@ -76,7 +76,11 @@ async def rag_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ign
 # ---------------------------------------------------------------------------
 
 async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ignore[type-arg]
-    """Generate traffic records via LLM."""
+    """Generate traffic records via the nested generate subgraph (P2.4).
+
+    The subgraph encapsulates prompt preparation, LLM invocation, and
+    result parsing as an independently testable unit.
+    """
     session_id: str = state.get("session_id", "")  # type: ignore[assignment]
     _check_cancelled(session_id)
 
@@ -85,17 +89,45 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
     industry: str = state.get("industry", "")  # type: ignore[assignment]
     scenario: str = state.get("scenario", "")  # type: ignore[assignment]
 
-    logger.info("[Generate Worker] session=%s count=%d", session_id, count)
+    logger.info("[Generate Worker] session=%s count=%d (via subgraph)", session_id, count)
 
-    records: list[TrafficRecord] = await generate_records_by_llm(
-        count, stage, industry, scenario
-    )
+    # Build initial subgraph state from parent state
+    sub_state = {
+        "industry": industry,
+        "scenario": scenario,
+        "count": count,
+        "stage": stage,
+        "prompt": "",
+        "raw_response": "",
+        "records": [],
+        "error": "",
+    }
+
+    subgraph = build_generate_subgraph()
+    result = await subgraph.ainvoke(sub_state)
+
+    records: list[TrafficRecord] = result.get("records", []) or []
+    error: str = result.get("error", "") or ""
+
+    if error and not records:
+        msg = HumanMessage(
+            content=f"流量生成失败: {error[:200]}",
+            name="generate",
+        )
+        return Command(
+            goto="supervisor",
+            update={
+                "generated_records": [],
+                "error_message": error,
+                "messages": [msg],
+            },
+        )
 
     real_count = sum(1 for r in records if r.identity_label == "real")
     fake_count = sum(1 for r in records if r.identity_label == "fake")
 
     msg = HumanMessage(
-        content=f"流量生成完成: 共{len(records)}条 (真实{real_count}, 脚本{fake_count})",
+        content=f"流量生成完成(subgraph): 共{len(records)}条 (真实{real_count}, 脚本{fake_count})",
         name="generate",
     )
 
