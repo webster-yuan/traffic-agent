@@ -262,6 +262,43 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+/* ---- replay panel (P4.1) ---- */
+
+.replay-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.replay-panel label {
+  margin-bottom: 12px;
+}
+
+.replay-panel select,
+.replay-panel input {
+  margin-top: 4px;
+}
+
+.replay-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.replay-error {
+  color: #dc2626;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.replay-success {
+  color: #059669;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
 .error-card {
   margin: 12px 0;
   border: 1px solid #fecaca;

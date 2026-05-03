@@ -15,13 +15,20 @@ from app.models.schemas import (
     BatchGenerateRequest,
     BatchStatusResponse,
     BatchTaskStatus,
+    CheckpointItem,
+    CheckpointListResponse,
     SessionStatus,
     TrafficGenerateRequest,
     TrafficGenerateResponse,
+    TrafficReplayRequest,
 )
 from app.graph.workflow import get_traffic_graph
 from app.services.generator import write_csv, write_traffic_json, write_traffic_parquet
-from app.services.graph_runner import build_initial_state, run_generation_graph_async as run_graph
+from app.services.graph_runner import (
+    build_initial_state,
+    replay_from_checkpoint,
+    run_generation_graph_async as run_graph,
+)
 from app.services.tracing_config import build_graph_config
 from app.services.session_service import (
     add_batch_task,
@@ -385,6 +392,107 @@ async def cancel_generate(session_id: str) -> dict[str, str | bool]:
     add_cancelled(session_id)
     update_status(session_id, SessionStatus.cancelled)
     return {"success": True, "session_id": session_id, "message": "任务已终止"}
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint Replay endpoints (P4.1 — Time Travel)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/checkpoints/{session_id}",
+    response_model=CheckpointListResponse,
+)
+async def list_checkpoints(session_id: str) -> CheckpointListResponse:
+    """List all checkpoints for a completed session."""
+    graph = get_traffic_graph()
+    thread_id = f"traffic_{session_id}"
+    config: dict = {"configurable": {"thread_id": thread_id}}
+
+    items: list[CheckpointItem] = []
+    async for snapshot in graph.aget_state_history(config):
+        metadata = snapshot.metadata or {}
+        cid = snapshot.config.get("configurable", {}).get("checkpoint_id", "")
+        items.append(
+            CheckpointItem(
+                checkpoint_id=str(cid),
+                step=metadata.get("step", 0),
+                node_name=metadata.get("source", "unknown"),
+                timestamp=str(metadata.get("timestamp", "")),
+            )
+        )
+
+    return CheckpointListResponse(session_id=session_id, checkpoints=items)
+
+
+@router.post("/replay", response_model=TrafficGenerateResponse)
+async def replay_traffic(payload: TrafficReplayRequest) -> TrafficGenerateResponse:
+    """Replay a session from a specific checkpoint node."""
+    await _acquire()
+    start_at = time.perf_counter()
+    new_session_id = ""
+    try:
+        graph_result = await replay_from_checkpoint(
+            original_session_id=payload.session_id,
+            from_node=payload.from_node,
+            hint_override=payload.hint_override,
+        )
+        new_session_id = graph_result["session_id"]
+        scenario = graph_result["scenario"]
+        quality = graph_result["quality_score"]
+        records = graph_result["generated_records"]
+
+        # Build a graph config for session tracking
+        dummy_payload = TrafficGenerateRequest(
+            industry=graph_result["industry"],
+            count=graph_result["count"],
+            stage=graph_result["stage"],
+        )
+        graph_config = build_graph_config(
+            session_id=new_session_id, payload=dummy_payload,
+        )
+        create_session(
+            session_id=new_session_id,
+            industry=graph_result["industry"],
+            scenario=scenario,
+            stage=graph_result["stage"],
+            status=SessionStatus.processing,
+            requested_count=graph_result["count"],
+            record_count=0,
+            quality_score=None,
+            file_path=None,
+            trace_thread_id=graph_config["configurable"]["thread_id"],
+            trace_metadata=graph_config["metadata"],
+        )
+
+        file_path = write_csv(new_session_id, records, graph_result["industry"])
+        write_traffic_json(
+            new_session_id, records, graph_result["industry"],
+            scenario=scenario, quality=quality, stage=graph_result["stage"],
+        )
+        write_traffic_parquet(new_session_id, records, graph_result["industry"])
+        complete_session(
+            session_id=new_session_id,
+            scenario=scenario,
+            record_count=len(records),
+            file_path=file_path,
+            quality=quality,
+        )
+
+        return TrafficGenerateResponse(
+            success=True,
+            session_id=new_session_id,
+            total_count=len(records),
+            quality_score=quality,
+            generated_data=records,
+            processing_time_ms=int((time.perf_counter() - start_at) * 1000),
+        )
+    except Exception as e:
+        if new_session_id:
+            fail_session(new_session_id, str(e))
+        raise
+    finally:
+        _release()
 
 
 @router.get("/download/{session_id}")

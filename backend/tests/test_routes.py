@@ -250,3 +250,116 @@ class TestRoutes(unittest.TestCase):
             with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=parquet")
         self.assertEqual(resp.status_code, 404)
+
+    # ---- Checkpoint Replay tests (P4.1) ----
+
+    def test_list_checkpoints_returns_200(self) -> None:
+        """GET /checkpoints/{session_id} returns empty list for non-existent session."""
+        resp = self.client.get("/api/v1/traffic/checkpoints/nonexistent")
+        # Even for non-existent sessions, the endpoint returns 200 with empty list
+        # (LangGraph's aget_state_history yields nothing for unknown threads)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["session_id"], "nonexistent")
+        self.assertIsInstance(data["checkpoints"], list)
+
+    def test_replay_endpoint_with_mocked_replay(self) -> None:
+        """POST /replay creates a new session from checkpoint."""
+        rec = self._sample_record("id-replay")
+        quality = QualityScore(
+            format_score=92,
+            business_score=91,
+            diversity_score=89,
+            total_score=90.7,
+            passed=True,
+        )
+        with patch(
+            "app.api.routes.replay_from_checkpoint",
+            new_callable=AsyncMock,
+        ) as mock_replay, patch(
+            "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"
+        ), patch(
+            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+        ), patch(
+            "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
+        ), patch(
+            "app.api.routes.create_session", lambda *args, **kwargs: None
+        ), patch(
+            "app.api.routes.complete_session", lambda *args, **kwargs: None
+        ):
+            mock_replay.return_value = {
+                "session_id": "replay123abc",
+                "industry": "ride_hailing",
+                "stage": "standard",
+                "count": 3,
+                "scenario": "通勤高峰",
+                "quality_score": quality,
+                "generated_records": [rec],
+            }
+            resp = self.client.post(
+                "/api/v1/traffic/replay",
+                json={
+                    "session_id": "abc123",
+                    "from_node": "rag",
+                    "hint_override": "多生成POST请求",
+                },
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["session_id"], "replay123abc")
+        self.assertEqual(data["total_count"], 1)
+        self.assertEqual(data["quality_score"]["total_score"], 90.7)
+
+        # Verify replay_from_checkpoint was called with correct args
+        mock_replay.assert_called_once_with(
+            original_session_id="abc123",
+            from_node="rag",
+            hint_override="多生成POST请求",
+        )
+
+    def test_replay_without_hint_override(self) -> None:
+        """POST /replay works without optional hint_override."""
+        rec = self._sample_record("id-replay2")
+        quality = QualityScore(
+            format_score=90, business_score=90, diversity_score=90,
+            total_score=90, passed=True,
+        )
+        with patch(
+            "app.api.routes.replay_from_checkpoint",
+            new_callable=AsyncMock,
+        ) as mock_replay, patch(
+            "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"
+        ), patch(
+            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+        ), patch(
+            "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
+        ), patch(
+            "app.api.routes.create_session", lambda *args, **kwargs: None
+        ), patch(
+            "app.api.routes.complete_session", lambda *args, **kwargs: None
+        ):
+            mock_replay.return_value = {
+                "session_id": "replay456def",
+                "industry": "ecommerce",
+                "stage": "quick",
+                "count": 5,
+                "scenario": "全天候配送",
+                "quality_score": quality,
+                "generated_records": [rec],
+            }
+            resp = self.client.post(
+                "/api/v1/traffic/replay",
+                json={
+                    "session_id": "def456",
+                    "from_node": "generate",
+                },
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        mock_replay.assert_called_once_with(
+            original_session_id="def456",
+            from_node="generate",
+            hint_override=None,
+        )

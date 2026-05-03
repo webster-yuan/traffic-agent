@@ -2,16 +2,64 @@
 import { computed, onMounted, ref } from 'vue'
 import { useTrafficStore } from '../stores/trafficStore'
 import { industryOptions, statusOptions } from '../constants'
+import { replayTraffic, type ReplayFromNode } from '../api/trafficApi'
 
 const store = useTrafficStore()
 const selectedSessionId = ref('')
+
+// Replay state
+const replayOpen = ref(false)
+const replayFromNode = ref<ReplayFromNode>('generate')
+const replayHint = ref('')
+const replayLoading = ref(false)
+const replayError = ref('')
+const replaySuccess = ref('')
 
 const selectedTask = computed(() =>
   store.history.find((item) => item.session_id === selectedSessionId.value) || null
 )
 
 function selectTask(sessionId: string) {
-  selectedSessionId.value = selectedSessionId.value === sessionId ? '' : sessionId
+  if (selectedSessionId.value === sessionId) {
+    selectedSessionId.value = ''
+    replayOpen.value = false
+    replayError.value = ''
+    replaySuccess.value = ''
+  } else {
+    selectedSessionId.value = sessionId
+    replayOpen.value = false
+    replayError.value = ''
+    replaySuccess.value = ''
+  }
+}
+
+function toggleReplay() {
+  replayOpen.value = !replayOpen.value
+  replayError.value = ''
+  replaySuccess.value = ''
+  replayFromNode.value = 'generate'
+  replayHint.value = ''
+}
+
+async function doReplay() {
+  if (!selectedTask.value) return
+  replayLoading.value = true
+  replayError.value = ''
+  replaySuccess.value = ''
+  try {
+    const result = await replayTraffic({
+      session_id: selectedTask.value.session_id,
+      from_node: replayFromNode.value,
+      hint_override: replayHint.value || undefined,
+    })
+    replaySuccess.value = `重放完成！新 Session: ${result.session_id}，共 ${result.total_count} 条记录`
+    replayOpen.value = false
+    await store.refreshHistory()
+  } catch (e: unknown) {
+    replayError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    replayLoading.value = false
+  }
 }
 
 function onFilterChange() {
@@ -182,6 +230,31 @@ onMounted(async () => {
           📊 导出 HTML 报告
         </a>
       </p>
+      <p class="result" v-if="selectedTask.status === 'completed'">
+        <button class="ghost" @click="toggleReplay">🔄 重放此任务</button>
+      </p>
+      <div v-if="replayOpen" class="replay-panel">
+        <label>
+          从节点重放：
+          <select v-model="replayFromNode">
+            <option value="rag">RAG检索后（重新生成）</option>
+            <option value="generate">生成后（重新评估）</option>
+            <option value="eval">评估后（重新身份校验）</option>
+          </select>
+        </label>
+        <label>
+          自定义提示（可选）：
+          <input v-model="replayHint" type="text" placeholder="如：请多生成POST请求" />
+        </label>
+        <div class="replay-actions">
+          <button :disabled="replayLoading" @click="doReplay">
+            {{ replayLoading ? '执行中...' : '执行重放' }}
+          </button>
+          <button class="ghost neutral" @click="replayOpen = false">取消</button>
+        </div>
+        <p v-if="replayError" class="replay-error">{{ replayError }}</p>
+        <p v-if="replaySuccess" class="replay-success">{{ replaySuccess }}</p>
+      </div>
     </div>
   </section>
 </template>

@@ -1,6 +1,6 @@
 # Traffic Agent 路线图与下一步指引
 
-**更新**: 2026-05-01
+**更新**: 2026-05-03
 **技术栈**: FastAPI + LangGraph + SQLite + Vue 3 + Pinia + Vite + Ollama (qwen2.5:7b)
 **环境**: Windows 10 + PowerShell + Ollama 本地
 
@@ -163,7 +163,7 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 | # | 任务 | 说明 | 改动量 |
 |---|------|------|--------|
-| 🔴 1 | **Checkpoint Replay / Time Travel** | 已有 `AsyncSqliteSaver` 持久化检查点，加 API 端点支持从任意节点回放。前端加"重放"按钮，回退到 generate 前换 prompt 重试 | ~80 行 |
+| 🔴 1 | **Checkpoint Replay / Time Travel** | 已有 `AsyncSqliteSaver` 持久化检查点，加 API 端点支持从任意节点回放。前端加"重放"按钮，回退到 generate 前换 prompt 重试 | ~80 行 ✅ **已完成 (2026-05-03)** |
 | 🟡 2 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 |
 | 🟡 3 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 |
 | 🟢 4 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 |
@@ -175,7 +175,7 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 ```
 当前可做（无需环境升级）:
   1. 🟡 报表 PDF 导出                   ← 业务交付最高价值
-  2. 🔴 Checkpoint Replay / Time Travel  ← LangGraph 深度展示
+  2. 🔴 Checkpoint Replay / Time Travel  ← ✅ 已完成 (2026-05-03)
   3. 🟡 真 RAG 向量检索 (ChromaDB)       ← 知识库自进化
   4. 🟡 质量重试硬上限 + 降级策略          ← 修复已知问题
   5. 🟢 Prompt 自优化反馈闭环             ← 模型能力增强

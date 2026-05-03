@@ -165,3 +165,39 @@ class RouterDecision(BaseModel):
         description="Next worker to invoke, or FINISH to end"
     )
     reason: str = Field(description="Why this worker was chosen (Chinese, ≤50 chars)")
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint Replay models (P4.1 — Time Travel)
+# ---------------------------------------------------------------------------
+
+REPLAY_FROM_NODES = Literal["rag", "generate", "eval", "identity"]
+
+
+class TrafficReplayRequest(BaseModel):
+    """Request to replay a session from a specific checkpoint node."""
+
+    session_id: str = Field(description="Original session ID to replay from")
+    from_node: REPLAY_FROM_NODES = Field(
+        description="Replay starting after this node completes (e.g. 'rag' replays from generate onward)"
+    )
+    hint_override: str | None = Field(
+        default=None,
+        description="Optional custom hint/prompt to inject before regeneration",
+    )
+
+
+class CheckpointItem(BaseModel):
+    """A single checkpoint snapshot."""
+
+    checkpoint_id: str
+    step: int
+    node_name: str
+    timestamp: str
+
+
+class CheckpointListResponse(BaseModel):
+    """Response wrapper for checkpoint listing."""
+
+    session_id: str
+    checkpoints: list[CheckpointItem]

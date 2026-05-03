@@ -329,3 +329,45 @@ export async function getBatchStatus(batchId: string) {
   }
   return res.json() as Promise<BatchStatusResponse>
 }
+
+// ---- Checkpoint Replay types and API (P4.1) ----
+
+export type ReplayFromNode = 'rag' | 'generate' | 'eval' | 'identity'
+
+export interface ReplayPayload {
+  session_id: string
+  from_node: ReplayFromNode
+  hint_override?: string
+}
+
+export interface CheckpointItem {
+  checkpoint_id: string
+  step: number
+  node_name: string
+  timestamp: string
+}
+
+export interface CheckpointListResponse {
+  session_id: string
+  checkpoints: CheckpointItem[]
+}
+
+export async function listCheckpoints(sessionId: string) {
+  const res = await fetch(`${API_BASE}/checkpoints/${sessionId}`)
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json() as Promise<CheckpointListResponse>
+}
+
+export async function replayTraffic(payload: ReplayPayload) {
+  const res = await fetch(`${API_BASE}/replay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json()
+}
