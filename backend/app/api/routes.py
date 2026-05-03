@@ -148,24 +148,6 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 "eval": "质量评估",
                 "identity": "身份校验",
             }
-            # Expanded map covering supervisor & subgraph internal nodes (P3.2)
-            all_node_names: dict[str, str] = {
-                **stage_name_map,
-                "supervisor": "Supervisor主控",
-                "prepare_prompt": "准备提示词",
-                "call_llm": "调用LLM",
-                "parse_result": "解析结果",
-            }
-            node_descriptions: dict[str, str] = {
-                "rag": "检索 {industry} 行业案例并推断场景",
-                "generate": "根据场景和案例调用 LLM 生成 {count} 条流量记录",
-                "eval": "Pandera 质量评估 (格式/业务/多样性)",
-                "identity": "身份标签校验 (真实用户 vs 自动化脚本)",
-                "supervisor": "Supervisor 分析当前状态，决定下一步 Worker",
-                "prepare_prompt": "构造流量生成提示词 (包含行业 context + 样例)",
-                "call_llm": "调用 Ollama LLM 生成原始 JSON",
-                "parse_result": "解析并校验 LLM 返回的 TrafficRecord 列表",
-            }
             stage_progress_map = {
                 "rag": 25,
                 "generate": 60,
@@ -175,7 +157,6 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             seen_start: set[str] = set()
             stage_started_at: dict[str, float] = {}
             final_state: dict | None = None
-            thought_count = 0  # throttle thought_token events
 
             # 发送开始事件
             yield f"event: start\ndata: {{\"session_id\": \"{session_id}\"}}\n\n"
@@ -185,133 +166,101 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             initial_state = build_initial_state(session_id=session_id, payload=payload)
             logger.info(f"session_id={session_id} 初始状态构建完成: industry={payload.industry}, stage={payload.stage}, count={payload.count}")
 
-            # 监听graph事件流
+            # 监听 graph 事件流 (P3.3 — stream_mode=custom for progress)
             logger.info(f"session_id={session_id} 开始监听graph事件流")
             event_count = 0
-            async for event in graph.astream_events(
+            async for (mode, data) in graph.astream(
                 initial_state,
                 config=graph_config,
-                version="v1",
+                stream_mode=["updates", "custom"],
             ):
                 event_count += 1
-                event_type = event.get("event")
-                metadata = event.get("metadata", {}) or {}
-                node = metadata.get("langgraph_node")
-                
-                # ── P3.2 Thought events: LLM activity ──────────────────────
-                if event_type == "on_chat_model_start" and node:
-                    node_label = all_node_names.get(node, node)
-                    yield (
-                        "event: thought\n"
-                        f"data: {json.dumps({'type': 'llm_start', 'node': node, 'message': f'{node_label} LLM 开始推理...'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                    )
 
-                if event_type == "on_chat_model_stream" and node:
-                    chunk = (event.get("data", {}) or {}).get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        thought_count += 1
-                        # Throttle: emit only every 10th token to avoid flooding
-                        if thought_count % 10 == 0:
+                # ── Custom events from get_stream_writer() ─────────────
+                if mode == "custom":
+                    evt_type = data.get("type", "") if isinstance(data, dict) else ""
+
+                    if evt_type == "stage_start":
+                        node = data.get("node", "")
+                        if node not in seen_start:
+                            seen_start.add(node)
+                            stage_started_at[node] = time.perf_counter()
+                            logger.info(f"session_id={session_id} 阶段开始: {node}")
                             yield (
-                                "event: thought_token\n"
-                                f"data: {json.dumps({'node': node, 'content': str(chunk.content)}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                                "event: stage_start\n"
+                                f"data: {json.dumps({'stage': node, 'name': data.get('name', node), 'progress': stage_progress_map.get(node, max(stage_progress_map.get(node, 15) - 15, 10))}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                             )
 
-                if event_type == "on_chat_model_end" and node:
-                    node_label = all_node_names.get(node, node)
-                    yield (
-                        "event: thought\n"
-                        f"data: {json.dumps({'type': 'llm_end', 'node': node, 'message': f'{node_label} LLM 完成'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                    )
-
-                # ── Thought events: node entry descriptions ────────────────
-                if event_type == "on_chain_start" and node and node not in seen_start:
-                    desc = node_descriptions.get(node)
-                    if desc:
-                        desc = desc.replace("{industry}", str(payload.industry)).replace("{count}", str(payload.count))
+                    elif evt_type == "thought":
                         yield (
                             "event: thought\n"
-                            f"data: {json.dumps({'type': 'node_start', 'node': node, 'message': desc}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                            f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         )
 
-                # ── Thought: supervisor decision (P3.2) ────────────────────
-                if event_type == "on_chain_end" and node == "supervisor":
-                    output = (event.get("data", {}) or {}).get("output")
-                    decision_text = None
-                    # Supervisor returns structured RouterDecision from LLM
-                    if hasattr(output, "next") and hasattr(output, "reason"):
-                        decision_text = f"[Supervisor] → {output.next}: {output.reason}"
-                    elif isinstance(output, dict):
-                        msgs = output.get("messages", []) or []
-                        for m in msgs:
-                            if isinstance(m, dict) and m.get("content"):
-                                decision_text = str(m["content"]); break
-                            if hasattr(m, "content") and m.content:
-                                decision_text = str(m.content); break
-                        if not decision_text:
-                            nw = output.get("next_worker", "")
-                            if nw and nw != "__end__":
-                                decision_text = f"[Supervisor] → {nw}"
-                    if decision_text:
+                    elif evt_type == "generate_progress":
                         yield (
-                            "event: thought_decision\n"
-                            f"data: {json.dumps({'decision': decision_text}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                            "event: generate_progress\n"
+                            f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         )
 
-                # 只处理我们关心的节点事件
-                if node not in stage_name_map:
                     continue
 
-                # 阶段开始事件
-                if event_type == "on_chain_start" and node not in seen_start:
-                    seen_start.add(node)
-                    stage_started_at[node] = time.perf_counter()
-                    logger.info(f"session_id={session_id} 阶段开始: {node}")
-                    payload_data = {
-                        "stage": node,
-                        "name": stage_name_map[node],
-                        "progress": max(stage_progress_map[node] - 15, 10),
-                    }
-                    yield (
-                        "event: stage_start\n"
-                        f"data: {json.dumps(payload_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                    )
+                # ── mode == "updates" — node output (replaces on_chain_end) ──
+                # data is a dict like {"supervisor": {...}} — iterate over entries
+                for node_name, state_update in data.items():
 
-                # 阶段结束事件
-                if event_type == "on_chain_end":
-                    output = (event.get("data", {}) or {}).get("output")
-                    if isinstance(output, dict):
-                        final_state = output
+                    # ── Supervisor decision extraction ────────────────────
+                    if node_name == "supervisor":
+                        msgs = state_update.get("messages", []) or []
+                        decision_text = None
+                        for m in msgs:
+                            content = None
+                            if isinstance(m, dict):
+                                content = m.get("content")
+                            elif hasattr(m, "content"):
+                                content = m.content
+                            if content and "[Supervisor]" in str(content):
+                                decision_text = str(content)
+                                break
+                        if not decision_text:
+                            nw = state_update.get("next_worker", "")
+                            if nw:
+                                decision_text = f"[Supervisor] → {nw}"
+                        if decision_text:
+                            yield (
+                                "event: thought_decision\n"
+                                f"data: {json.dumps({'decision': decision_text}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                            )
 
-                    # 评估阶段的特殊进度事件
-                    if node == "eval" and isinstance(output, dict):
-                        retries = output.get("retries", 0)
+                    # Skip non-stage nodes
+                    if node_name not in stage_name_map:
+                        continue
+
+                    # ── Stage complete ─────────────────────────────────────
+                    # Merge state updates (each node only returns changed keys)
+                    if final_state is None:
+                        final_state = dict(state_update)
+                    else:
+                        final_state.update(state_update)
+
+                    # Eval-specific stage_progress event
+                    if node_name == "eval":
+                        retries = state_update.get("retries", 0)
                         logger.info(f"session_id={session_id} 评估阶段进度: 第 {retries} 次重试")
-                        payload_data = {
-                            "stage": "eval",
-                            "retry": retries,
-                            "progress": stage_progress_map["eval"],
-                        }
                         yield (
                             "event: stage_progress\n"
-                            f"data: {json.dumps(payload_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                            f"data: {json.dumps({'stage': 'eval', 'retry': retries, 'progress': stage_progress_map['eval']}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         )
 
-                    logger.info(f"session_id={session_id} 阶段完成: {node}")
+                    logger.info(f"session_id={session_id} 阶段完成: {node_name}")
                     elapsed_ms = None
-                    if node in stage_started_at:
-                        elapsed_ms = int((time.perf_counter() - stage_started_at[node]) * 1000)
-                    payload_data = {
-                        "stage": node,
-                        "status": "success",
-                        "progress": stage_progress_map[node],
-                        "elapsed_ms": elapsed_ms,
-                    }
+                    if node_name in stage_started_at:
+                        elapsed_ms = int((time.perf_counter() - stage_started_at[node_name]) * 1000)
                     yield (
                         "event: stage_complete\n"
-                        f"data: {json.dumps(payload_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                        f"data: {json.dumps({'stage': node_name, 'status': 'success', 'progress': stage_progress_map[node_name], 'elapsed_ms': elapsed_ms}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     )
-                
+
                 # 每50个事件记录一次调试信息
                 if event_count % 50 == 0:
                     logger.debug(f"session_id={session_id} 已处理 {event_count} 个事件")

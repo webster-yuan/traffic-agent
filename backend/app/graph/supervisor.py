@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
+from langgraph.config import get_stream_writer
 from langgraph.types import Command, Send
 
 from app.core.config import settings
@@ -88,6 +89,18 @@ async def supervisor_node(
 
     session_id: str = state.get("session_id", "")  # type: ignore[assignment]
     industry: str = state.get("industry", "")  # type: ignore[assignment]
+
+    # ── Custom streaming: stage start ──────────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "stage_start",
+            "node": "supervisor",
+            "name": "Supervisorä¸»æ§",
+            "message": "Supervisor åæå½åç¶æï¼å³å®ä¸ä¸æ­¥ Worker",
+        })
+    except RuntimeError:
+        pass
 
     # --- Check for parallel dispatch opportunity (P2.3) -------------------
     # In full stage, eval and identity are independent — fan them out.
@@ -170,8 +183,32 @@ async def supervisor_node(
     )
 
     try:
+        # ── Custom streaming: LLM start ────────────────────────────────
+        try:
+            writer = get_stream_writer()
+            writer({
+                "type": "thought",
+                "phase": "llm_start",
+                "node": "supervisor",
+                "message": "Supervisorä¸»æ§ LLM å¼å§æ¨ç...",
+            })
+        except RuntimeError:
+            pass
+
         structured_llm = llm.with_structured_output(RouterDecision, method="json_mode")
         decision: RouterDecision = await structured_llm.ainvoke(all_msgs)
+
+        # ── Custom streaming: LLM end ──────────────────────────────────
+        try:
+            writer = get_stream_writer()
+            writer({
+                "type": "thought",
+                "phase": "llm_end",
+                "node": "supervisor",
+                "message": "Supervisorä¸»æ§ LLM æ¨çå®æ",
+            })
+        except RuntimeError:
+            pass
     except Exception:
         logger.warning("[Supervisor] structured output failed, using fallback routing")
         decision = _fallback_route(state)

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, TypedDict
 
 from langchain_ollama import ChatOllama
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from app.core.config import settings
@@ -79,6 +80,19 @@ async def prepare_prompt_node(state: GenerateSubState) -> dict[str, Any]:
 
     examples = _get_examples(industry)
     examples_str = "\n".join([json.dumps(e, ensure_ascii=False) for e in examples])
+
+    # ── Custom streaming: notify progress ─────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "generate_progress",
+            "phase": "prepare",
+            "message": f"正在构建提示词 (行业={industry}, 场景={scenario})",
+            "industry": industry,
+            "count": count,
+        })
+    except RuntimeError:
+        pass  # stream_mode="custom" not enabled in sync invoke
 
     prompt = f"""你是网络流量数据生成助手。根据以下行业和场景信息，生成真实的流量数据。
 
@@ -141,6 +155,18 @@ async def call_llm_node(state: GenerateSubState) -> dict[str, Any]:
     timeout = getattr(settings, "llm_timeout", 300)
     logger.info("[GenerateSub] calling LLM (model=%s, timeout=%ds)", settings.ollama_model, timeout)
 
+    # ── Custom streaming: LLM call started ────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "generate_progress",
+            "phase": "llm_call",
+            "message": f"正在调用 LLM 生成流量数据 (超时={timeout}s)...",
+            "timeout": timeout,
+        })
+    except RuntimeError:
+        pass
+
     try:
         response = await asyncio.wait_for(
             llm.ainvoke(f"{prompt}\n\n请生成流量数据"),
@@ -150,6 +176,19 @@ async def call_llm_node(state: GenerateSubState) -> dict[str, Any]:
         if not content:
             return {"error": "LLM returned empty content", "raw_response": ""}
         logger.info("[GenerateSub] LLM response received: %d chars", len(content))
+
+        # ── Custom streaming: LLM response received ───────────────────
+        try:
+            writer = get_stream_writer()
+            writer({
+                "type": "generate_progress",
+                "phase": "llm_done",
+                "message": f"LLM 响应已收到 ({len(content)} 字符)，开始解析...",
+                "chars": len(content),
+            })
+        except RuntimeError:
+            pass
+
         return {"raw_response": content, "error": ""}
     except asyncio.TimeoutError:
         logger.error("[GenerateSub] LLM call timed out after %ds", timeout)
@@ -195,6 +234,7 @@ async def parse_result_node(state: GenerateSubState) -> dict[str, Any]:
     # --- Build TrafficRecord list --------------------------------------------
     now = datetime.now(timezone.utc)
     records: list[TrafficRecord] = []
+    total = min(count, len(result))
     for i, item in enumerate(result[:count]):
         record = TrafficRecord(
             id=item.get("id", str(uuid.uuid4())),
@@ -218,6 +258,21 @@ async def parse_result_node(state: GenerateSubState) -> dict[str, Any]:
             identity_label=item.get("identity_label", "real"),
         )
         records.append(record)
+
+        # ── Custom streaming: per‑record parse progress (every 5) ──────
+        parsed = i + 1
+        if parsed % 5 == 0 or parsed == total:
+            try:
+                writer = get_stream_writer()
+                writer({
+                    "type": "generate_progress",
+                    "phase": "parse",
+                    "message": f"已解析 {parsed}/{total} 条记录...",
+                    "parsed": parsed,
+                    "total": total,
+                })
+            except RuntimeError:
+                pass
 
     real_count = sum(1 for r in records if r.identity_label == "real")
     fake_count = sum(1 for r in records if r.identity_label == "fake")

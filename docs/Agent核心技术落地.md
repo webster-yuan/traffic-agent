@@ -140,6 +140,53 @@ result = await subgraph.ainvoke(sub_state)
 - 各 Worker 的 `on_chain_end` 只有 partial state update，不能依赖它获取完整 `quality_score`
 - 前端用 Pinia store 的 `thoughts[]` 数组 + `thoughtSeq` 自增 ID 渲染滚动日志
 
+#### 2.4.1 Custom Streaming 升级：节点内细粒度进度
+
+**问题**: 上述 `astream_events` 只能在节点边界报告进度。对于 30-60s 的 LLM 调用，用户看到长时间空白等待，且无法感知单条记录解析进度。
+
+**方案**: 将 `astream_events` 升级为 `astream(stream_mode=["updates", "custom"])`，搭配 `get_stream_writer()` 在节点内部推送进度。
+
+```python
+# routes.py — 切换流模式
+async for (mode, data) in graph.astream(
+    initial_state, config=graph_config,
+    stream_mode=["updates", "custom"],
+):
+    if mode == "custom":
+        # data = writer() 推送的字典
+        handle_custom_event(data)
+    elif mode == "updates":
+        node_name, state_update = data  # (str, dict)
+        # 等同于 on_chain_end
+
+# generate_subgraph.py — 节点内推送
+from langgraph.config import get_stream_writer
+
+async def parse_result_node(state):
+    writer = get_stream_writer()
+    for i, item in enumerate(result[:count]):
+        record = TrafficRecord(...)
+        records.append(record)
+        if (i + 1) % 5 == 0:
+            writer({"type": "generate_progress", "phase": "parse",
+                    "parsed": i + 1, "total": count,
+                    "message": f"已解析 {i+1}/{count} 条记录..."})
+```
+
+**新增 SSE 事件**: `generate_progress` — 四阶段子进度：
+
+| phase | 触发 | 前端展示 |
+|-------|------|---------|
+| `prepare` | 提示词构建完成 | `正在构建提示词 (行业=finance, 50条)` |
+| `llm_call` | 开始调用 LLM | `正在调用 LLM 生成流量数据 (超时=300s)...` |
+| `llm_done` | LLM 响应返回 | `LLM 响应已收到 (12543 字符)，开始解析...` |
+| `parse` | 每 5 条记录 | `已解析 25/50 条记录...` |
+
+**落地要点**:
+- `get_stream_writer()` 仅在 `stream_mode="custom"` 时可用；非流式调用（sync invoke）中返回 `None`，用 `try/except RuntimeError` 兜底
+- 切换 `astream` 后丢失 `on_chain_start` / `on_chat_model_*` 事件 → 改为在各节点入口通过 `writer()` 手动推送 `stage_start` / `thought` 事件
+- `("updates", (node, state_update))` 元组解包替代 `on_chain_end`，Supervisor 决策从 `state_update["messages"]` 提取
+
 ### 2.5 检查点持久化：AsyncSqliteSaver
 
 **问题**: 服务重启后所有进行中的任务丢失，也无法回溯历史执行步骤。

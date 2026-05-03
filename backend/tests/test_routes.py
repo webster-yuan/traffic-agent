@@ -80,29 +80,23 @@ class TestRoutes(unittest.TestCase):
         )
 
         class FakeGraph:
-            async def astream_events(self, *_args, **_kwargs):
-                yield {
-                    "event": "on_chain_start",
-                    "metadata": {"langgraph_node": "rag"},
-                    "data": {},
-                }
-                yield {
-                    "event": "on_chain_end",
-                    "metadata": {"langgraph_node": "rag"},
-                    "data": {"output": {"retries": 0}},
-                }
-                yield {
-                    "event": "on_chain_end",
-                    "metadata": {"langgraph_node": "eval"},
-                    "data": {
-                        "output": {
-                            "retries": 1,
-                            "scenario": "通勤高峰",
-                            "quality_score": quality,
-                            "generated_records": [rec],
-                        }
-                    },
-                }
+            async def astream(self, *_args, **kwargs):
+                # stream_mode=["updates", "custom"] — yield (mode, data) tuples
+                _stream_mode = kwargs.get("stream_mode", [])
+                emit_custom = "custom" in _stream_mode
+
+                if emit_custom:
+                    yield ("custom", {"type": "stage_start", "node": "rag", "name": "RAG检索", "message": "检索行业案例"})
+                yield ("updates", {"rag": {"retries": 0}})
+
+                if emit_custom:
+                    yield ("custom", {"type": "stage_start", "node": "eval", "name": "质量评估", "message": "评估质量"})
+                yield ("updates", {"eval": {
+                    "retries": 1,
+                    "scenario": "通勤高峰",
+                    "quality_score": quality,
+                    "generated_records": [rec],
+                }})
 
         with patch("app.api.routes.get_traffic_graph", lambda: FakeGraph()), patch(
             "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"

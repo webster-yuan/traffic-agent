@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from langgraph.config import get_stream_writer
 from langgraph.types import Command
 
 from app.core.state import is_cancelled
@@ -42,6 +43,18 @@ async def rag_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ign
     session_id: str = state.get("session_id", "")  # type: ignore[assignment]
     industry: str = state.get("industry", "")  # type: ignore[assignment]
     _check_cancelled(session_id)
+
+    # ── Custom streaming: stage start ──────────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "stage_start",
+            "node": "rag",
+            "name": "RAGæ£ç´¢",
+            "message": f"æ£ç´¢ {industry} è¡ä¸æ¡ä¾å¹¶æ¨æ­åºæ¯",
+        })
+    except RuntimeError:
+        pass
 
     logger.info("[RAG Worker] session=%s industry=%s", session_id, industry)
     scenario = infer_scenario(industry)
@@ -85,6 +98,19 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
     _check_cancelled(session_id)
 
     count: int = state.get("count", 10)  # type: ignore[assignment]
+
+    # ââ Custom streaming: stage start ââââââââââââââââââââââââââ
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "stage_start",
+            "node": "generate",
+            "name": "æµéçæ",
+            "message": f"æ ¹æ®åºæ¯åæ¡ä¾è°ç¨ LLM çæ {count} æ¡æµéè®°å½",
+        })
+    except RuntimeError:
+        pass
+
     stage: Stage = state.get("stage", Stage.standard)  # type: ignore[assignment]
     industry: str = state.get("industry", "")  # type: ignore[assignment]
     scenario: str = state.get("scenario", "")  # type: ignore[assignment]
@@ -149,6 +175,18 @@ async def eval_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ig
     session_id: str = state.get("session_id", "")  # type: ignore[assignment]
     _check_cancelled(session_id)
 
+    # ── Custom streaming: stage start ──────────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "stage_start",
+            "node": "eval",
+            "name": "质量评估",
+            "message": "Pandera 质量评估 (格式/业务/多样性)",
+        })
+    except RuntimeError:
+        pass
+
     records: list[TrafficRecord] = state.get("generated_records", []) or []  # type: ignore[assignment]
     industry: str = state.get("industry", "")  # type: ignore[assignment]
     retries: int = state.get("retries", 0)  # type: ignore[assignment]
@@ -186,6 +224,18 @@ async def identity_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
     """Perform identity-label validation on generated records."""
     session_id: str = state.get("session_id", "")  # type: ignore[assignment]
     _check_cancelled(session_id)
+
+    # ── Custom streaming: stage start ──────────────────────────────────
+    try:
+        writer = get_stream_writer()
+        writer({
+            "type": "stage_start",
+            "node": "identity",
+            "name": "身份校验",
+            "message": "身份标签校验 (真实用户 vs 自动化脚本)",
+        })
+    except RuntimeError:
+        pass
 
     stage: Stage = state.get("stage", Stage.standard)  # type: ignore[assignment]
     records: list[TrafficRecord] = state.get("generated_records", []) or []  # type: ignore[assignment]

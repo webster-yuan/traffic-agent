@@ -18,6 +18,7 @@ import {
   type StageProgress,
   type Thought,
   type ThoughtDecision,
+  type GenerateProgress,
 } from '../api/trafficApi'
 
 const INDUSTRY_SCENARIO: Record<string, string> = {
@@ -233,6 +234,16 @@ export const useTrafficStore = defineStore('traffic', {
         },
         (_data: { node: string; content: string }) => {
           // thought_token: too chatty, skip for now
+        },
+        (progress: GenerateProgress) => {
+          const icon = progress.phase === 'parse'
+            ? `📊`
+            : progress.phase === 'llm_call'
+              ? '🤖'
+              : progress.phase === 'llm_done'
+                ? '✅'
+                : '📝'
+          addThought(`${icon} ${progress.message}`)
         },
         this.abortController.signal
       )

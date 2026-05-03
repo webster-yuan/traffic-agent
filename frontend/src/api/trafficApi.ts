@@ -158,6 +158,19 @@ export type ThoughtDecision = {
   decision: string
 }
 
+// P3.3 Custom streaming: per-record generation progress
+export type GenerateProgress = {
+  type: 'generate_progress'
+  phase: 'prepare' | 'llm_call' | 'llm_done' | 'parse'
+  message: string
+  parsed?: number
+  total?: number
+  chars?: number
+  count?: number
+  industry?: string
+  timeout?: number
+}
+
 export function generateTrafficStream(
   payload: GeneratePayload,
   onStart: (sessionId: string) => void,
@@ -170,6 +183,7 @@ export function generateTrafficStream(
   onThought?: (thought: Thought) => void,
   onThoughtDecision?: (decision: ThoughtDecision) => void,
   onThoughtToken?: (data: { node: string; content: string }) => void,
+  onGenerateProgress?: (progress: GenerateProgress) => void,
   signal?: AbortSignal
 ) {
   fetch(`${API_BASE}/generate/stream`, {
@@ -218,6 +232,9 @@ export function generateTrafficStream(
               break
             case 'thought_token':
               onThoughtToken?.(data)
+              break
+            case 'generate_progress':
+              onGenerateProgress?.(data)
               break
             case 'finalize':
               onFinalize(data)
