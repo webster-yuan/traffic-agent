@@ -2,7 +2,7 @@
 
 > 本文档介绍 Traffic Agent 项目中围绕 LangGraph Agent 架构的核心技术选型与落地要点，是面试/汇报场景下的技术深度参考。
 
-**更新**: 2026-04-29  
+**更新**: 2026-05-03  
 **技术栈**: LangGraph 1.x + LangChain + FastAPI + Ollama (qwen2.5:7b)
 
 ---
@@ -184,6 +184,58 @@ def _fallback_route(state) -> RouterDecision:
 - 降级路径：纯 Python if-else（100% 可靠、零延迟）
 - 保证了系统的 **可用性** 优先于 **智能性**
 
+### 2.7 检查点回放：State History + Fork Replay
+
+**问题**: 已完成的任务无法在不重新配置的情况下换个 prompt 重试；调试时也看不到每个节点的中间状态。
+
+**方案**: 利用 LangGraph `AsyncSqliteSaver` 的 `aget_state_history()` API 遍历检查点历史，提取目标节点状态后 fork 为新会话重放。
+
+```python
+# graph_runner.py — replay_from_checkpoint()
+
+async def replay_from_checkpoint(
+    original_session_id: str, from_node: str, hint_override: str | None = None,
+) -> dict:
+    graph = get_traffic_graph()
+    original_config = {"configurable": {"thread_id": f"traffic_{original_session_id}"}}
+
+    # Step 1: 遍历检查点历史，找到 from_node 完成后的状态快照
+    target_state = None
+    async for snapshot in graph.aget_state_history(original_config):
+        if snapshot.metadata.get("source") == from_node:
+            target_state = snapshot.values  # StateSnapshot.values 是完整 GraphState
+            break
+
+    # Step 2: 从快照中提取所需字段
+    industry = target_state["industry"]
+    scenario = target_state["scenario"]
+    retrieved_cases = list(target_state["retrieved_cases"])
+
+    # Step 3: 注入可选的 hint override
+    if hint_override:
+        retrieved_cases.append({"type": "llm_hint", "content": hint_override})
+
+    # Step 4: 重置质量/重试字段，创建全新 session + thread_id
+    new_state = {
+        "session_id": uuid.uuid4().hex[:12],
+        "industry": industry, "scenario": scenario,
+        "retries": 0, "quality_score": QualityScore(total_score=0, passed=False),
+        "retrieved_cases": retrieved_cases, "messages": [HumanMessage(...)],
+        # ... 其他字段
+    }
+    new_config = build_graph_config(session_id=new_state["session_id"], payload=...)
+
+    # Step 5: Fork 重放 — 新 thread_id 独立运行，不污染原检查点
+    return await graph.ainvoke(new_state, config=new_config)
+```
+
+**落地要点**:
+- `aget_state_history(config)` 返回最近→最远的快照流，每个 `StateSnapshot` 包含 `values`（完整状态）和 `metadata`（step / source / timestamp）
+- **Fork 而非 Resume**：不使用 LangGraph 原生 `ainvoke(None, config_with_checkpoint_id)`，而是提取状态后新建 `thread_id` 运行——每次重放都是独立会话，多次重放互不干扰
+- `from_node` 参数定义重放起点：`"rag"` 表示从 RAG 完成后重放（重新生成），`"generate"` 表示从生成完成后重放（重新评估）
+- 前端在已完成会话的详情卡片中提供"重放"按钮和内联面板（选择节点 + 可选自定义提示词）
+- API 端点：`GET /api/v1/traffic/checkpoints/{session_id}` 列出检查点、`POST /api/v1/traffic/replay` 执行重放
+
 ---
 
 ## 三、可观测性体系
@@ -222,10 +274,9 @@ def evaluate_quality(records, industry) -> QualityScore: ...
 
 ### 后续提升方向（详见 ROADMAP.md 第六节）
 
-1. **Checkpoint Replay / Time Travel** — 检查点回放，调试 + 重试能力
-2. **真 RAG 向量检索 (ChromaDB)** — 静态示例 → 动态知识库
-3. **质量重试硬上限 + 降级策略** — 修复重试循环
-4. **Prompt 自优化反馈闭环** — 利用评估结果反向改进 prompt
+1. **真 RAG 向量检索 (ChromaDB)** — 静态示例 → 动态知识库
+2. **质量重试硬上限 + 降级策略** — 修复重试循环
+3. **Prompt 自优化反馈闭环** — 利用评估结果反向改进 prompt
 
 ---
 
@@ -240,5 +291,7 @@ def evaluate_quality(records, industry) -> QualityScore: ...
 | `backend/app/graph/state.py` | `GraphState` TypedDict 定义 |
 | `backend/app/api/routes.py` | SSE 流式端点 + thought 事件发射 |
 | `backend/app/services/generator.py` | LLM 调用 + 质量评分 + @traceable |
+| `backend/app/services/graph_runner.py` | 图执行入口 + 检查点回放 (`replay_from_checkpoint`) |
 | `frontend/src/stores/trafficStore.ts` | 前端 Pinia store（thoughts[] + SSE 回调） |
 | `frontend/src/components/GeneratePanel.vue` | 生成面板 UI（含思考链展示） |
+| `frontend/src/components/HistoryPanel.vue` | 历史面板 UI（含重放按钮） |

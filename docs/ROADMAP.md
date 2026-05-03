@@ -14,7 +14,7 @@
     ▼
 FastAPI (uvicorn, port 8000)
     │
-    ├── routes.py           API 端点（生成/历史/下载/报表/批量）
+    ├── routes.py           API 端点（生成/历史/下载/报表/批量/回放）
     ├── session_service     SQLite CRUD + 批量任务状态
     ├── generator.py        LLM 调用（async）+ 质量评分 + CSV/JSON/Parquet
     ├── quality_validator   Pandera 声明式 schema（15 校验规则）
@@ -48,8 +48,9 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 批量 | 最多 10 任务并发 | 独立会话 + 2 秒轮询 + `asyncio.Semaphore(3)` |
 | 历史 | 服务端 7 维筛选 + 分页 | SQLite 动态 WHERE，20 条/页 |
 | 前端 UI | Tab 导航 + 虚拟滚动 + 响应式 | CSS Grid + `content-visibility:auto` + 粘性表头 |
-| 测试 | 55 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出 |
+| 测试 | 61 个 pytest | 质量评估 13 专项 + 路由/生成/并发/取消/导出/回放 |
 | 清理 | 定期文件清理 | `cleanup_schedule.py`，30 天过期 |
+| 检查点回放 | 任意节点状态回放 | `aget_state_history()` + Fork Replay，支持 hint override |
 
 ---
 
@@ -159,14 +160,13 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 ## 六、LangGraph Agent 深度提升（待实施）
 
-以下 4 项从 LangGraph 能力深度出发，无需环境升级即可实施，按价值排序：
+以下 3 项从 LangGraph 能力深度出发，无需环境升级即可实施：
 
 | # | 任务 | 说明 | 改动量 |
 |---|------|------|--------|
-| 🔴 1 | **Checkpoint Replay / Time Travel** | 已有 `AsyncSqliteSaver` 持久化检查点，加 API 端点支持从任意节点回放。前端加"重放"按钮，回退到 generate 前换 prompt 重试 | ~80 行 ✅ **已完成 (2026-05-03)** |
-| 🟡 2 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 |
-| 🟡 3 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 |
-| 🟢 4 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 |
+| 🟡 1 | **真 RAG 向量检索** | 当前 `rag_worker` 读静态 JSON，改为 ChromaDB 嵌入式向量库，成功案例自动入库，语义相似度检索 | ~150 行 |
+| 🟡 2 | **质量重试硬上限 + 降级策略** | qwen2.5:7b 质量评分偏低导致无限重试 → Supervisor 增加降级路由：3 次不通过后切换宽松阈值或标记 "best effort" | ~40 行 |
+| 🟢 3 | **Prompt 自优化反馈闭环** | eval 返回不合格字段明细 → generate 读取后动态调整 prompt，形成自我改进循环 | ~60 行 |
 
 ---
 
@@ -175,19 +175,18 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 ```
 当前可做（无需环境升级）:
   1. 🟡 报表 PDF 导出                   ← 业务交付最高价值
-  2. 🔴 Checkpoint Replay / Time Travel  ← ✅ 已完成 (2026-05-03)
-  3. 🟡 真 RAG 向量检索 (ChromaDB)       ← 知识库自进化
-  4. 🟡 质量重试硬上限 + 降级策略          ← 修复已知问题
-  5. 🟢 Prompt 自优化反馈闭环             ← 模型能力增强
-  6. 🟢 移动端 @media 适配               ← 5 分钟 quick win
-  7. 🟢 lifespan → on_event             ← 消除 deprecation warning
+  2. 🟡 真 RAG 向量检索 (ChromaDB)       ← 知识库自进化
+  3. 🟡 质量重试硬上限 + 降级策略          ← 修复已知问题
+  4. 🟢 Prompt 自优化反馈闭环             ← 模型能力增强
+  5. 🟢 移动端 @media 适配               ← 5 分钟 quick win
+  6. 🟢 lifespan → on_event             ← 消除 deprecation warning
 
 需要环境升级:
-  8. Windows 11 + Docker Desktop
-  9. SQLAlchemy ORM + PostgreSQL
- 10. Celery + Redis 任务队列
+  7. Windows 11 + Docker Desktop
+  8. SQLAlchemy ORM + PostgreSQL
+  9. Celery + Redis 任务队列
 
 远期:
- 11. 多模型对比 + LangSmith 回归
- 12. 模板 + Prompt 版本管理
+ 10. 多模型对比 + LangSmith 回归
+ 11. 模板 + Prompt 版本管理
 ```
