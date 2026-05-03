@@ -96,6 +96,18 @@ function stageStatusText(status: string) {
         </div>
       </div>
     </div>
+
+    <!-- P3.2 Agent Thought Process -->
+    <div v-if="store.thoughts.length > 0" class="thought-log">
+      <div class="thought-header">Agent 思考过程</div>
+      <div class="thought-list" ref="thoughtListRef">
+        <div
+          v-for="t in store.thoughts"
+          :key="t.id"
+          class="thought-line"
+        >{{ t.text }}</div>
+      </div>
+    </div>
     <p v-if="store.downloadPath" class="result download-links">
       下载：
       <a :href="store.fileUrl(store.sessionId, 'csv')" target="_blank" rel="noreferrer">CSV</a>

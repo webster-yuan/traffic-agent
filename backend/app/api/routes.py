@@ -141,6 +141,24 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 "eval": "质量评估",
                 "identity": "身份校验",
             }
+            # Expanded map covering supervisor & subgraph internal nodes (P3.2)
+            all_node_names: dict[str, str] = {
+                **stage_name_map,
+                "supervisor": "Supervisor主控",
+                "prepare_prompt": "准备提示词",
+                "call_llm": "调用LLM",
+                "parse_result": "解析结果",
+            }
+            node_descriptions: dict[str, str] = {
+                "rag": "检索 {industry} 行业案例并推断场景",
+                "generate": "根据场景和案例调用 LLM 生成 {count} 条流量记录",
+                "eval": "Pandera 质量评估 (格式/业务/多样性)",
+                "identity": "身份标签校验 (真实用户 vs 自动化脚本)",
+                "supervisor": "Supervisor 分析当前状态，决定下一步 Worker",
+                "prepare_prompt": "构造流量生成提示词 (包含行业 context + 样例)",
+                "call_llm": "调用 Ollama LLM 生成原始 JSON",
+                "parse_result": "解析并校验 LLM 返回的 TrafficRecord 列表",
+            }
             stage_progress_map = {
                 "rag": 25,
                 "generate": 60,
@@ -150,6 +168,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             seen_start: set[str] = set()
             stage_started_at: dict[str, float] = {}
             final_state: dict | None = None
+            thought_count = 0  # throttle thought_token events
 
             # 发送开始事件
             yield f"event: start\ndata: {{\"session_id\": \"{session_id}\"}}\n\n"
@@ -172,6 +191,66 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 metadata = event.get("metadata", {}) or {}
                 node = metadata.get("langgraph_node")
                 
+                # ── P3.2 Thought events: LLM activity ──────────────────────
+                if event_type == "on_chat_model_start" and node:
+                    node_label = all_node_names.get(node, node)
+                    yield (
+                        "event: thought\n"
+                        f"data: {json.dumps({'type': 'llm_start', 'node': node, 'message': f'{node_label} LLM 开始推理...'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                    )
+
+                if event_type == "on_chat_model_stream" and node:
+                    chunk = (event.get("data", {}) or {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        thought_count += 1
+                        # Throttle: emit only every 10th token to avoid flooding
+                        if thought_count % 10 == 0:
+                            yield (
+                                "event: thought_token\n"
+                                f"data: {json.dumps({'node': node, 'content': str(chunk.content)}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                            )
+
+                if event_type == "on_chat_model_end" and node:
+                    node_label = all_node_names.get(node, node)
+                    yield (
+                        "event: thought\n"
+                        f"data: {json.dumps({'type': 'llm_end', 'node': node, 'message': f'{node_label} LLM 完成'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                    )
+
+                # ── Thought events: node entry descriptions ────────────────
+                if event_type == "on_chain_start" and node and node not in seen_start:
+                    desc = node_descriptions.get(node)
+                    if desc:
+                        desc = desc.replace("{industry}", str(payload.industry)).replace("{count}", str(payload.count))
+                        yield (
+                            "event: thought\n"
+                            f"data: {json.dumps({'type': 'node_start', 'node': node, 'message': desc}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                        )
+
+                # ── Thought: supervisor decision (P3.2) ────────────────────
+                if event_type == "on_chain_end" and node == "supervisor":
+                    output = (event.get("data", {}) or {}).get("output")
+                    decision_text = None
+                    # Supervisor returns structured RouterDecision from LLM
+                    if hasattr(output, "next") and hasattr(output, "reason"):
+                        decision_text = f"[Supervisor] → {output.next}: {output.reason}"
+                    elif isinstance(output, dict):
+                        msgs = output.get("messages", []) or []
+                        for m in msgs:
+                            if isinstance(m, dict) and m.get("content"):
+                                decision_text = str(m["content"]); break
+                            if hasattr(m, "content") and m.content:
+                                decision_text = str(m.content); break
+                        if not decision_text:
+                            nw = output.get("next_worker", "")
+                            if nw and nw != "__end__":
+                                decision_text = f"[Supervisor] → {nw}"
+                    if decision_text:
+                        yield (
+                            "event: thought_decision\n"
+                            f"data: {json.dumps({'decision': decision_text}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                        )
+
                 # 只处理我们关心的节点事件
                 if node not in stage_name_map:
                     continue
@@ -239,9 +318,9 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 yield "event: cancelled\ndata: {\"message\":\"任务已取消\"}\n\n"
                 return
 
-            # 检查最终状态
-            if final_state is None:
-                logger.warning(f"session_id={session_id} 事件流未获取到最终状态，回退同步调用")
+            # 检查最终状态 — 依赖 on_chain_end 可能不完整（节点只返回 partial update）
+            if final_state is None or "quality_score" not in final_state:
+                logger.warning(f"session_id={session_id} final_state 不完整 (quality_score 缺失)，回退同步调用")
                 final_state = await run_graph(session_id=session_id, payload=payload)
                 logger.info(f"session_id={session_id} 同步调用完成，获取到最终状态")
 

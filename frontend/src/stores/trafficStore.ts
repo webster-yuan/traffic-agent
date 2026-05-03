@@ -16,6 +16,8 @@ import {
   type HistoryItem,
   type StageComplete,
   type StageProgress,
+  type Thought,
+  type ThoughtDecision,
 } from '../api/trafficApi'
 
 const INDUSTRY_SCENARIO: Record<string, string> = {
@@ -91,6 +93,9 @@ export const useTrafficStore = defineStore('traffic', {
     historyTotal: 0,
     historyFilters: createHistoryFilters(),
     abortController: null as AbortController | null,
+    // P3.2 Agent thought process
+    thoughts: [] as { id: number; text: string; ts: number }[],
+    thoughtSeq: 0,
     // batch state
     batchId: '',
     batchTasks: [] as BatchTaskStatus[],
@@ -171,8 +176,17 @@ export const useTrafficStore = defineStore('traffic', {
       this.lastPayload = { ...payload }
       this.resultMessage = ''
       this.downloadPath = ''
+      this.thoughts = []
+      this.thoughtSeq = 0
       this.abortController?.abort()
       this.abortController = new AbortController()
+
+      const addThought = (text: string) => {
+        this.thoughtSeq++
+        this.thoughts.push({ id: this.thoughtSeq, text, ts: Date.now() })
+        // Keep at most 30 recent thoughts
+        if (this.thoughts.length > 30) this.thoughts.shift()
+      }
 
       generateTrafficStream(
         payload,
@@ -210,6 +224,15 @@ export const useTrafficStore = defineStore('traffic', {
           this.running = false
           this.abortController = null
           this.refreshHistory()
+        },
+        (thought: Thought) => {
+          addThought(`💭 ${thought.message}`)
+        },
+        (decision: ThoughtDecision) => {
+          addThought(`🧠 ${decision.decision}`)
+        },
+        (_data: { node: string; content: string }) => {
+          // thought_token: too chatty, skip for now
         },
         this.abortController.signal
       )

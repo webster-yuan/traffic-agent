@@ -188,6 +188,7 @@ async def supervisor_node(
     ai_msg = AIMessage(
         content=f"[Supervisor] → {decision.next}: {decision.reason}",
         name="supervisor",
+        additional_kwargs={"decision_next": decision.next, "decision_reason": decision.reason},
     )
 
     return Command(

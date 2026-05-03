@@ -147,6 +147,17 @@ export type Complete = {
   success: boolean
 }
 
+// P3.2 Agent thought events for streaming thought process display
+export type Thought = {
+  type: 'llm_start' | 'llm_end' | 'node_start' | string
+  node: string
+  message: string
+}
+
+export type ThoughtDecision = {
+  decision: string
+}
+
 export function generateTrafficStream(
   payload: GeneratePayload,
   onStart: (sessionId: string) => void,
@@ -156,6 +167,9 @@ export function generateTrafficStream(
   onFinalize: (data: Finalize) => void,
   onComplete: (result: Complete) => void,
   onError: (error: string) => void,
+  onThought?: (thought: Thought) => void,
+  onThoughtDecision?: (decision: ThoughtDecision) => void,
+  onThoughtToken?: (data: { node: string; content: string }) => void,
   signal?: AbortSignal
 ) {
   fetch(`${API_BASE}/generate/stream`, {
@@ -195,6 +209,15 @@ export function generateTrafficStream(
               break
             case 'stage_complete':
               onStageComplete(data)
+              break
+            case 'thought':
+              onThought?.(data)
+              break
+            case 'thought_decision':
+              onThoughtDecision?.(data)
+              break
+            case 'thought_token':
+              onThoughtToken?.(data)
               break
             case 'finalize':
               onFinalize(data)

@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import json
+import os
 import random
 import uuid
 import logging
@@ -17,6 +18,15 @@ from app.core.config import settings
 from app.models.schemas import QualityScore, Stage, TrafficRecord
 from app.services.quality_validator import validate_business, validate_format
 
+# ── P3.3 LangSmith traceable decorator ───────────────────────
+if os.environ.get("LANGCHAIN_TRACING_V2") == "true":
+    from langsmith.run_helpers import traceable
+else:
+    def traceable(*args, **kwargs):  # type: ignore[no-redef]
+        def decorator(func):
+            return func
+        return decorator
+
 
 def _fix_json(text: str) -> str:
     text = text.strip()
@@ -30,6 +40,7 @@ def _fix_json(text: str) -> str:
     return text
 
 
+@traceable(name="infer_scenario")
 def infer_scenario(industry: str) -> str:
     mapping = {
         "government": "工作日办公时间",
@@ -361,6 +372,16 @@ def _score_diversity(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     return score, _dedupe_notes(notes, cap=8)
 
 
+@traceable(
+    name="evaluate_quality",
+    process_outputs=lambda result: {
+        "total_score": result.total_score,
+        "passed": result.passed,
+        "format": result.format_score,
+        "business": result.business_score,
+        "diversity": result.diversity_score,
+    },
+)
 def evaluate_quality(records: list[TrafficRecord], industry: str) -> QualityScore:
     logger.info("开始质量评估...")
 
