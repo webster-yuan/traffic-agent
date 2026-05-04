@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.state import add_cancelled, is_cancelled
-from app.graph.nodes import rag_node
+from app.graph.shared import check_cancelled
 
 
 class TestCancellation:
@@ -39,6 +39,6 @@ class TestCancellation:
         session_id = "test-cancel-node"
         add_cancelled(session_id)
 
-        # 模拟节点调用
+        # 模拟节点取消检查
         with pytest.raises(RuntimeError, match="Task cancelled"):
-            rag_node({"session_id": session_id, "industry": "ecommerce", "stage": "standard", "count": 10})
+            check_cancelled(session_id)

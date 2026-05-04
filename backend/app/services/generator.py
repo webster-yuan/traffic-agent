@@ -16,6 +16,14 @@ from app.services.llm_factory import get_ollama_llm
 from app.core.config import settings
 from app.core.json_utils import fix_json
 from app.core.utils import dedupe_notes
+from app.data.industries import (
+    INDUSTRIES,
+    INDUSTRY_KEYS,
+    get_industry_context,
+    get_industry_paths,
+    get_random_body,
+    infer_scenario as _infer_scenario_impl,
+)
 from app.models.schemas import QualityScore, Stage, TrafficRecord
 from app.services.quality_validator import validate_business, validate_format
 
@@ -29,41 +37,21 @@ else:
         return decorator
 
 
+# ── Re-export from single source of truth (app/data/industries.py) ──
+# get_industry_context, get_industry_paths imported above
+
+
 @traceable(name="infer_scenario")
 def infer_scenario(industry: str) -> str:
-    mapping = {
-        "government": "工作日办公时间",
-        "ecommerce": "全天候配送",
-        "short_video": "内容创作时段",
-        "ride_hailing": "通勤高峰",
-        "logistics": "夜间运输",
-        "delivery": "饭点高峰",
-        "finance": "交易高峰",
-        "healthcare": "门诊就诊时段",
-        "media": "晚间播放高峰",
-        "social": "内容互动高峰",
-        "gaming": "在线对战时段",
-    }
-    scenario = mapping.get(industry, "自定义场景")
-    logger.info(f"推断场景: industry={industry} -> scenario={scenario}")
+    """Traced thin wrapper around single source of truth."""
+    scenario = _infer_scenario_impl(industry)
+    logger.info("Scenario inferred: industry=%s -> scenario=%s", industry, scenario)
     return scenario
 
 
 def _industry_context(industry: str) -> str:
-    mapping = {
-        "government": "政务办公、审批流转、用户资料查询",
-        "ecommerce": "商品浏览、购物车、订单创建、库存查询",
-        "short_video": "视频推荐、点赞评论、创作者上传",
-        "ride_hailing": "司机定位、订单匹配、支付结算",
-        "logistics": "运单创建、轨迹查询、车辆定位",
-        "delivery": "骑手状态、取餐派送、订单更新",
-        "finance": "账户查询、支付转账、风控校验、交易确认",
-        "healthcare": "预约挂号、电子病历、检查报告、影像查询",
-        "media": "播放鉴权、CDN 分片、观看进度、推荐列表",
-        "social": "动态信息流、关注关系、私信、图片上传",
-        "gaming": "登录鉴权、匹配队列、战斗同步、心跳上报",
-    }
-    return mapping.get(industry, "自定义业务接口")
+    """DEPRECATED: use get_industry_context() from app.data.industries instead."""
+    return get_industry_context(industry)
 
 
 def _random_ip() -> str:
@@ -81,36 +69,13 @@ def _random_url(industry: str) -> str:
 
 
 def _industry_paths() -> dict[str, list[str]]:
-    return {
-        "government": ["/api/office/doc", "/api/approval/send", "/api/user/info"],
-        "ecommerce": ["/api/product/list", "/api/order/create", "/api/cart/add"],
-        "short_video": ["/api/video/feed", "/api/like", "/api/comment/list"],
-        "ride_hailing": ["/api/driver/location", "/api/order/match", "/api/payment"],
-        "logistics": ["/api/track/query", "/api/waybill/create", "/api/truck/position"],
-        "delivery": ["/api/order/pickup", "/api/rider/status", "/api/delivery/update"],
-        "finance": ["/api/account/balance", "/api/payment/transfer", "/api/risk/check"],
-        "healthcare": ["/api/appointment/book", "/api/emr/detail", "/api/report/query"],
-        "media": ["/api/play/auth", "/api/cdn/segment", "/api/watch/progress"],
-        "social": ["/api/feed/timeline", "/api/relation/follow", "/api/message/send"],
-        "gaming": ["/api/matchmaking/join", "/api/battle/sync", "/api/player/heartbeat"],
-    }
+    """DEPRECATED: use get_industry_paths() from app.data.industries directly."""
+    return {k: get_industry_paths(k) for k in INDUSTRY_KEYS}
 
 
 def _random_body(industry: str) -> dict[str, Any]:
-    bodies = {
-        "government": {"doc_id": str(uuid.uuid4()), "approval_step": random.randint(1, 5)},
-        "ecommerce": {"sku_id": f"SKU{random.randint(10000, 99999)}", "quantity": random.randint(1, 5)},
-        "short_video": {"video_id": str(uuid.uuid4()), "action": random.choice(["like", "comment", "share"])},
-        "ride_hailing": {"order_id": str(uuid.uuid4()), "city_code": random.choice(["010", "021", "0755"])},
-        "logistics": {"waybill_no": f"WB{random.randint(100000, 999999)}", "truck_id": f"TRK{random.randint(100, 999)}"},
-        "delivery": {"order_id": str(uuid.uuid4()), "rider_id": random.randint(10000, 99999)},
-        "finance": {"account_id": random.randint(100000, 999999), "amount": round(random.uniform(10, 5000), 2)},
-        "healthcare": {"patient_id": random.randint(100000, 999999), "department": random.choice(["cardiology", "radiology", "general"])},
-        "media": {"asset_id": str(uuid.uuid4()), "bitrate": random.choice([720, 1080, 2160])},
-        "social": {"post_id": str(uuid.uuid4()), "visibility": random.choice(["public", "friends", "private"])},
-        "gaming": {"player_id": random.randint(100000, 999999), "room_id": f"room-{random.randint(1000, 9999)}"},
-    }
-    return bodies.get(industry, {"request_id": str(uuid.uuid4())})
+    """DEPRECATED: use get_random_body() from app.data.industries instead."""
+    return get_random_body(industry)
 
 
 def _random_header(is_script: bool) -> dict:
@@ -143,21 +108,21 @@ def _get_examples(industry: str) -> list[dict[str, Any]]:
     examples_dir = Path(__file__).parent.parent.parent / "data" / "examples"
     path = examples_dir / f"{industry}.json"
     if not path.exists():
-        logger.warning(f"行业 {industry} 无专属示例文件, 回退到 custom.json")
+        logger.warning("Industry %s has no dedicated example file, falling back to custom.json", industry)
         path = examples_dir / "custom.json"
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _get_llm_timeout() -> int:
-    """获取 LLM 调用超时时间（秒）"""
+    """Get LLM call timeout (seconds)."""
     return getattr(settings, "llm_timeout", 300)
 
 
 async def generate_records_by_llm(count: int, stage: Stage, industry: str, scenario: str) -> list[TrafficRecord]:
-    """生成流量记录（异步函数，用于 LangGraph 节点）"""
+    """Generate traffic records (async, for LangGraph nodes)."""
     try:
-        logger.info(f"开始调用LLM生成流量: count={count}, industry={industry}, scenario={scenario}")
+        logger.info("Calling LLM to generate traffic: count=%s, industry=%s, scenario=%s", count, industry, scenario)
 
         examples = _get_examples(industry)
         examples_str = "\n".join([json.dumps(e, ensure_ascii=False) for e in examples])

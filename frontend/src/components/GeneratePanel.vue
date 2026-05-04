@@ -2,7 +2,6 @@
 import { ref } from 'vue'
 import { useTrafficStore } from '../stores/trafficStore'
 import type { Stage } from '../api/trafficApi'
-import { industryOptions } from '../constants'
 
 const store = useTrafficStore()
 const industry = ref('ride_hailing')
@@ -41,7 +40,7 @@ function stageStatusText(status: string) {
       <label>
         行业
         <select v-model="industry">
-          <option v-for="item in industryOptions" :key="item.value" :value="item.value">
+          <option v-for="item in store.industries" :key="item.key" :value="item.key">
             {{ item.label }}
           </option>
         </select>

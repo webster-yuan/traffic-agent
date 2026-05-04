@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.data.industries import INDUSTRY_KEYS
+
 
 class Stage(str, Enum):
     quick = "quick"
@@ -19,12 +21,21 @@ class SessionStatus(str, Enum):
     cancelled = "cancelled"
 
 
+# Industry Literal type — MUST stay in sync with INDUSTRY_KEYS in app/data/industries.py
+# Test test_industry_keys_sync() verifies alignment
 Industry = Literal[
     "government", "ecommerce", "short_video",
     "ride_hailing", "logistics", "delivery",
     "finance", "healthcare", "media",
     "social", "gaming", "custom",
 ]
+
+
+class IndustryItem(BaseModel):
+    """Simplified industry info for frontend API."""
+    key: str
+    label: str
+    scenario: str
 
 
 class TrafficGenerateRequest(BaseModel):

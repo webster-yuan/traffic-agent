@@ -15,25 +15,35 @@ class GraphState(TypedDict):
     Supervisor → Worker orchestration pattern.
     """
 
+    # ── Request identity ──
     session_id: str
     industry: str
     stage: Stage
     count: int
+
+    # ── RAG context ──
     scenario: str
-    retries: int
-    max_retries: int
     retrieved_cases: list[dict]
+
+    # ── Generation output ──
     generated_records: list[TrafficRecord]
+
+    # ── Quality evaluation (4 fields) ──
     quality_score: QualityScore
     quality_passed: bool
     should_retry: bool
-    identity_checked: bool
-    # --- Human-in-the-Loop approval fields ---
+    eval_feedback: str  # aggregated failure notes from eval, fed back to generate
+
+    # ── Human-in-the-Loop ──
     approval_action: str  # "approve" | "reject" | ""
     approval_hint: str    # user feedback when rejecting
-    # --- Prompt self-optimization feedback ---
-    eval_feedback: str    # aggregated failure notes from eval, fed back to generate
+
+    # ── Flow control ──
+    retries: int
+    max_retries: int
+    identity_checked: bool
     error_message: str
-    # --- Supervisor-Worker orchestration fields ---
+
+    # ── Supervisor orchestration ──
     messages: Annotated[list[BaseMessage], operator.add]
     next_worker: str

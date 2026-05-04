@@ -1,8 +1,8 @@
 import logging
-from langchain.chat_models import init_chat_model
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.config import settings
+from app.services.llm_factory import get_ollama_llm
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +21,7 @@ def build_generation_hint(industry: str, scenario: str, count: int) -> str:
             ]
         )
         
-        llm = init_chat_model(
-            model=settings.ollama_model,
-            model_provider="ollama",
-            base_url=settings.ollama_base_url,
-            temperature=0.1,
-            timeout=300,
-        )
+        llm = get_ollama_llm(temperature=0.1)
         
         chain = prompt | llm
         result = chain.invoke(

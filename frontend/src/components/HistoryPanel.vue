@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useTrafficStore } from '../stores/trafficStore'
-import { industryOptions, statusOptions } from '../constants'
+import { statusOptions } from '../constants'
 import { replayTraffic, type ReplayFromNode } from '../api/trafficApi'
 
 const store = useTrafficStore()
@@ -83,7 +83,7 @@ onMounted(async () => {
         行业
         <select v-model="store.historyFilters.industry" @change="onFilterChange">
           <option value="">全部行业</option>
-          <option v-for="item in industryOptions" :key="item.value" :value="item.value">
+          <option v-for="item in store.industries" :key="item.key" :value="item.key">
             {{ item.label }}
           </option>
         </select>

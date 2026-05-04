@@ -66,7 +66,7 @@ async def rag_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ign
     ]
 
     msg = HumanMessage(
-        content=f"RAG完成: 行业={industry}, 场景={scenario}, 加载{len(retrieved)}条示例",
+        content=f"RAG completed: industry={industry}, scenario={scenario}, loaded {len(retrieved)} examples",
         name="rag",
     )
 
@@ -118,7 +118,7 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
     approval_hint: str = state.get("approval_hint", "")  # type: ignore[assignment]
     combined_feedback: str = eval_feedback
     if approval_hint:
-        hint_line = f"● 人工审核反馈: {approval_hint}"
+        hint_line = f"● Human review feedback: {approval_hint}"
         combined_feedback = (
             f"{eval_feedback}\n{hint_line}" if eval_feedback else hint_line
         )
@@ -144,7 +144,7 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
 
     if error and not records:
         msg = HumanMessage(
-            content=f"流量生成失败: {error[:200]}",
+            content=f"Traffic generation failed: {error[:200]}",
             name="generate",
         )
         return Command(
@@ -160,7 +160,7 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
     fake_count = sum(1 for r in records if r.identity_label == "fake")
 
     msg = HumanMessage(
-        content=f"流量生成完成(subgraph): 共{len(records)}条 (真实{real_count}, 脚本{fake_count})",
+        content=f"Traffic generation complete (subgraph): {len(records)} records (real={real_count}, fake={fake_count})",
         name="generate",
     )
 
@@ -214,17 +214,17 @@ async def eval_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ig
     if not passed:
         parts: list[str] = []
         if quality.format_notes:
-            parts.append("● 格式问题: " + "; ".join(quality.format_notes[:3]))
+            parts.append("● Format issues: " + "; ".join(quality.format_notes[:3]))
         if quality.business_notes:
-            parts.append("● 业务问题: " + "; ".join(quality.business_notes[:3]))
+            parts.append("● Business issues: " + "; ".join(quality.business_notes[:3]))
         if quality.diversity_notes:
-            parts.append("● 多样性问题: " + "; ".join(quality.diversity_notes[:3]))
+            parts.append("● Diversity issues: " + "; ".join(quality.diversity_notes[:3]))
         eval_feedback = "\n".join(parts)
         logger.info("[Eval Worker] feedback for generate: %s", eval_feedback[:120])
 
-    status_text = "通过" if passed else f"未通过(第{retries + 1}次)"
+    status_text = "Passed" if passed else f"Failed (attempt {retries + 1})"
     msg = HumanMessage(
-        content=f"质量评估: {status_text}, 总分={quality.total_score}",
+        content=f"Quality evaluation: {status_text}, total={quality.total_score}",
         name="eval",
     )
 
@@ -272,12 +272,12 @@ async def identity_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
         # Real identity service call would go here
         logger.info("[Identity Worker] identity check completed (mock)")
         msg = HumanMessage(
-            content="身份校验完成",
+            content="Identity check completed",
             name="identity",
         )
     else:
         msg = HumanMessage(
-            content="跳过身份校验 (stage != full)",
+            content="Identity check skipped (stage != full)",
             name="identity",
         )
 
@@ -333,6 +333,8 @@ async def approval_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
             "url": r.url,
             "status_code": r.status_code,
             "identity_label": r.identity_label,
+            "rtt": round(r.rtt, 2) if r.rtt else None,
+            "duration": round(r.duration, 2) if r.duration else None,
         })
 
     interrupt_payload = {

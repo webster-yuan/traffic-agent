@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import GeneratePanel from './components/GeneratePanel.vue'
 import BatchPanel from './components/BatchPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import { useTrafficStore } from './stores/trafficStore'
 
 const activeTab = ref<'generate' | 'batch' | 'history'>('generate')
+const store = useTrafficStore()
+
+onMounted(() => {
+  store.loadIndustries()
+})
 </script>
 
 <template>

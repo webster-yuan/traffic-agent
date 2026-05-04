@@ -34,6 +34,61 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Tracing helpers (moved from deprecated nodes.py)
+# ---------------------------------------------------------------------------
+
+
+def _record_field(record: Any, field: str) -> Any:
+    """Extract field from either a dict or object record (backward compat)."""
+    if isinstance(record, dict):
+        return record.get(field)
+    return getattr(record, field, None)
+
+
+def summarize_generate_output(state: dict[str, Any]) -> dict[str, Any]:
+    """Build a compact summary for LangSmith trace attachment.
+
+    Used as ``process_outputs`` callback by LangSmith's @traceable
+    decorator to avoid logging the full record list.
+    """
+    records = state.get("generated_records", []) or []
+    identity_counts: dict[str, int] = {}
+    for record in records:
+        identity = _record_field(record, "identity_label") or "unknown"
+        identity_counts[str(identity)] = identity_counts.get(str(identity), 0) + 1
+
+    sample_record = None
+    if records:
+        first = records[0]
+        sample_record = {
+            "method": _record_field(first, "method"),
+            "url": _record_field(first, "url"),
+            "status_code": _record_field(first, "status_code"),
+            "identity_label": _record_field(first, "identity_label"),
+            "user_agent": _record_field(first, "user_agent"),
+        }
+
+    hint = ""
+    for case in reversed(state.get("retrieved_cases", []) or []):
+        if isinstance(case, dict) and case.get("type") == "llm_hint":
+            hint = str(case.get("content", ""))
+            break
+
+    stage = state.get("stage")
+    return {
+        "session_id": state.get("session_id"),
+        "industry": state.get("industry"),
+        "scenario": state.get("scenario"),
+        "stage": getattr(stage, "value", stage),
+        "requested_count": state.get("count"),
+        "generated_count": len(records),
+        "identity_counts": identity_counts,
+        "hint": hint[:120],
+        "sample_record": sample_record,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Subgraph State
 # ---------------------------------------------------------------------------
 

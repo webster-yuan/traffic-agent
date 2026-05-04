@@ -3,6 +3,20 @@ import { createPinia, setActivePinia } from "pinia";
 import type { HistoryFilters, HistoryItem } from "../api/trafficApi";
 
 vi.mock("../api/trafficApi", () => ({
+  fetchIndustries: vi.fn().mockResolvedValue([
+    { key: 'government', label: '政府机关', scenario: '工作日办公时间' },
+    { key: 'ecommerce', label: '电商物流', scenario: '全天候配送' },
+    { key: 'short_video', label: '短视频', scenario: '内容创作时段' },
+    { key: 'ride_hailing', label: '网约车', scenario: '通勤高峰' },
+    { key: 'logistics', label: '货运物流', scenario: '夜间运输' },
+    { key: 'delivery', label: '即时配送', scenario: '饭点高峰' },
+    { key: 'finance', label: '金融交易', scenario: '交易高峰' },
+    { key: 'healthcare', label: '医疗系统', scenario: '门诊就诊时段' },
+    { key: 'media', label: '流媒体', scenario: '晚间播放高峰' },
+    { key: 'social', label: '社交媒体', scenario: '内容互动高峰' },
+    { key: 'gaming', label: '游戏服务', scenario: '在线对战时段' },
+    { key: 'custom', label: '自定义', scenario: '自定义场景' },
+  ]),
   generateTrafficStream: vi.fn(),
   listHistory: vi.fn().mockResolvedValue({ items: [] }),
   cancelGenerate: vi.fn().mockResolvedValue({ success: true }),
@@ -70,14 +84,24 @@ describe("trafficStore", () => {
     expect(store.stageSteps.find((step) => step.stage === "generate")?.elapsedMs).toBe(1200);
   });
 
-  it("inferScenario should return mapped scenario", () => {
+  it("inferScenario should return mapped scenario from store industries", () => {
     const store = useTrafficStore();
+    // Populate industries (simulating what loadIndustries() does)
+    store.industries = [
+      { key: 'ride_hailing', label: '网约车', scenario: '通勤高峰' },
+      { key: 'finance', label: '金融交易', scenario: '交易高峰' },
+      { key: 'healthcare', label: '医疗系统', scenario: '门诊就诊时段' },
+      { key: 'media', label: '流媒体', scenario: '晚间播放高峰' },
+      { key: 'social', label: '社交媒体', scenario: '内容互动高峰' },
+      { key: 'gaming', label: '游戏服务', scenario: '在线对战时段' },
+    ]
     expect(store.inferScenario("ride_hailing")).toBe("通勤高峰");
     expect(store.inferScenario("finance")).toBe("交易高峰");
     expect(store.inferScenario("healthcare")).toBe("门诊就诊时段");
     expect(store.inferScenario("media")).toBe("晚间播放高峰");
     expect(store.inferScenario("social")).toBe("内容互动高峰");
     expect(store.inferScenario("gaming")).toBe("在线对战时段");
+    expect(store.inferScenario("unknown_industry")).toBe("自定义场景");
   });
 
   it("retryLastGenerate should rerun the last failed payload", async () => {

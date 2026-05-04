@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from app.graph.nodes import _summarize_generate_output
+from app.graph.generate_subgraph import summarize_generate_output
 from app.models.schemas import Stage, TrafficRecord
 
 
@@ -36,7 +36,7 @@ class TestGraphNodes(unittest.TestCase):
             "generated_records": [record],
         }
 
-        summary = _summarize_generate_output(state)
+        summary = summarize_generate_output(state)
 
         self.assertEqual(summary["session_id"], "sess_001")
         self.assertEqual(summary["stage"], "quick")

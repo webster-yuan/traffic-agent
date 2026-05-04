@@ -1,5 +1,11 @@
 export type Stage = 'quick' | 'standard' | 'full'
 
+export interface IndustryItem {
+  key: string
+  label: string
+  scenario: string
+}
+
 export interface GeneratePayload {
   industry: string
   count: number
@@ -65,6 +71,14 @@ export async function generateTraffic(payload: GeneratePayload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json()
+}
+
+export async function fetchIndustries(): Promise<IndustryItem[]> {
+  const res = await fetch(`${API_BASE}/industries`)
   if (!res.ok) {
     throw new Error(await responseErrorMessage(res))
   }

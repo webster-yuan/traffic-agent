@@ -49,6 +49,7 @@ from app.services.session_service import (
     update_status,
 )
 from app.services.report_service import generate_report_html
+from app.data.industries import get_industries_for_frontend
 from app.core.state import add_cancelled, is_cancelled, remove_cancelled
 
 router = APIRouter(prefix="/api/v1/traffic", tags=["traffic"])
@@ -137,7 +138,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
 
 @router.post("/generate/stream")
 async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingResponse:
-    logger.info(f"收到流式请求: industry={payload.industry}, stage={payload.stage}, count={payload.count}")
+    logger.info("Stream request received: industry=%s, stage=%s, count=%s", payload.industry, payload.stage, payload.count)
     await _acquire()
     session_id = uuid.uuid4().hex[:12]
     graph_config = build_graph_config(session_id=session_id, payload=payload)
@@ -154,13 +155,13 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
         trace_thread_id=graph_config["configurable"]["thread_id"],
         trace_metadata=graph_config["metadata"],
     )
-    logger.info(f"session_id={session_id} 获取锁成功")
+    logger.info("session_id=%s lock acquired", session_id)
 
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
-            logger.info(f"session_id={session_id} 开始流式处理流程")
+            logger.info("session_id=%s started stream processing", session_id)
             graph = get_traffic_graph()
-            logger.info(f"session_id={session_id} Graph实例获取成功")
+            logger.info("session_id=%s graph instance acquired", session_id)
             
             stage_name_map = {
                 "rag": "RAG检索",
@@ -180,16 +181,16 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             stage_started_at: dict[str, float] = {}
             final_state: dict | None = None
 
-            # 发送开始事件
+            # Send start event
             yield f"event: start\ndata: {{\"session_id\": \"{session_id}\"}}\n\n"
-            logger.info(f"session_id={session_id} 开始事件已发送")
+            logger.info("session_id=%s start event sent", session_id)
 
-            # 初始化状态
+            # Build initial state
             initial_state = build_initial_state(session_id=session_id, payload=payload)
-            logger.info(f"session_id={session_id} 初始状态构建完成: industry={payload.industry}, stage={payload.stage}, count={payload.count}")
+            logger.info("session_id=%s initial state built: industry=%s, stage=%s, count=%s", session_id, payload.industry, payload.stage, payload.count)
 
-            # 监听 graph 事件流 (P3.3 — stream_mode=custom for progress)
-            logger.info(f"session_id={session_id} 开始监听graph事件流")
+            # Listen to graph event stream (P3.3 — stream_mode=custom for progress)
+            logger.info("session_id=%s listening to graph event stream", session_id)
             event_count = 0
             async for (mode, data) in graph.astream(
                 initial_state,
@@ -481,14 +482,21 @@ async def resume_generate(
     "/checkpoints/{session_id}",
     response_model=CheckpointListResponse,
 )
-async def list_checkpoints(session_id: str) -> CheckpointListResponse:
-    """List all checkpoints for a completed session."""
+async def list_checkpoints(
+    session_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    before: str | None = Query(default=None),
+) -> CheckpointListResponse:
+    """List checkpoints for a completed session with cursor pagination."""
     graph = get_traffic_graph()
     thread_id = f"traffic_{session_id}"
     config: dict = {"configurable": {"thread_id": thread_id}}
 
     items: list[CheckpointItem] = []
-    async for snapshot in graph.aget_state_history(config):
+    kwargs: dict = {"limit": limit}
+    if before:
+        kwargs["before"] = {"configurable": {"thread_id": thread_id, "checkpoint_id": before}}
+    async for snapshot in graph.aget_state_history(config, **kwargs):
         metadata = snapshot.metadata or {}
         cid = snapshot.config.get("configurable", {}).get("checkpoint_id", "")
         items.append(
@@ -786,3 +794,15 @@ async def get_report(session_id: str):
     if html is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return HTMLResponse(content=html, status_code=200)
+
+
+@router.get("/industries")
+async def get_industries():
+    """Return industry configuration list for frontend consumption.
+
+    Single source of truth: backend/app/data/industries.py.
+    Frontend fetches this on mount — no hardcoded industry data duplication.
+    """
+    from app.models.schemas import IndustryItem
+    data = get_industries_for_frontend()
+    return [IndustryItem(**item) for item in data]

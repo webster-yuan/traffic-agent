@@ -3,6 +3,7 @@ import {
   cancelGenerate,
   deleteHistory,
   downloadUrl,
+  fetchIndustries,
   generateTrafficStream,
   getBatchStatus,
   langsmithTraceUrl,
@@ -16,27 +17,13 @@ import {
   type GeneratePayload,
   type HistoryFilters,
   type HistoryItem,
+  type IndustryItem,
   type StageComplete,
   type StageProgress,
   type Thought,
   type ThoughtDecision,
   type GenerateProgress,
 } from '../api/trafficApi'
-
-const INDUSTRY_SCENARIO: Record<string, string> = {
-  government: '工作日办公时间',
-  ecommerce: '全天候配送',
-  short_video: '内容创作时段',
-  ride_hailing: '通勤高峰',
-  logistics: '夜间运输',
-  delivery: '饭点高峰',
-  finance: '交易高峰',
-  healthcare: '门诊就诊时段',
-  media: '晚间播放高峰',
-  social: '内容互动高峰',
-  gaming: '在线对战时段',
-  custom: '自定义场景',
-}
 
 const STAGE_NAME: Record<string, string> = {
   rag: 'RAG检索',
@@ -57,6 +44,21 @@ type StageStep = {
 }
 
 const STAGE_ORDER = ['rag', 'generate', 'eval', 'identity', 'approval']
+
+const FALLBACK_INDUSTRIES: IndustryItem[] = [
+  { key: 'government', label: '政府机关', scenario: '工作日办公时间' },
+  { key: 'ecommerce', label: '电商物流', scenario: '全天候配送' },
+  { key: 'short_video', label: '短视频', scenario: '内容创作时段' },
+  { key: 'ride_hailing', label: '网约车', scenario: '通勤高峰' },
+  { key: 'logistics', label: '货运物流', scenario: '夜间运输' },
+  { key: 'delivery', label: '即时配送', scenario: '饭点高峰' },
+  { key: 'finance', label: '金融交易', scenario: '交易高峰' },
+  { key: 'healthcare', label: '医疗系统', scenario: '门诊就诊时段' },
+  { key: 'media', label: '流媒体', scenario: '晚间播放高峰' },
+  { key: 'social', label: '社交媒体', scenario: '内容互动高峰' },
+  { key: 'gaming', label: '游戏服务', scenario: '在线对战时段' },
+  { key: 'custom', label: '自定义', scenario: '自定义场景' },
+]
 
 function createStageSteps(): StageStep[] {
   return STAGE_ORDER.map((stage) => ({
@@ -95,6 +97,8 @@ export const useTrafficStore = defineStore('traffic', {
     historyTotalPages: 1,
     historyTotal: 0,
     historyFilters: createHistoryFilters(),
+    // Industry config — fetched from backend single source of truth
+    industries: [] as IndustryItem[],
     abortController: null as AbortController | null,
     // P3.2 Agent thought process
     thoughts: [] as { id: number; text: string; ts: number }[],
@@ -113,7 +117,16 @@ export const useTrafficStore = defineStore('traffic', {
   },
   actions: {
     inferScenario(industry: string) {
-      return INDUSTRY_SCENARIO[industry] || '自定义场景'
+      const item = this.industries.find((i) => i.key === industry)
+      return item?.scenario || '自定义场景'
+    },
+    async loadIndustries() {
+      try {
+        this.industries = await fetchIndustries()
+      } catch {
+        console.warn('[TrafficStore] Failed to fetch industries, using fallback')
+        this.industries = FALLBACK_INDUSTRIES
+      }
     },
     async refreshHistory(page?: number) {
       const p = page ?? this.historyPage
@@ -283,21 +296,21 @@ export const useTrafficStore = defineStore('traffic', {
       this.abortController = null
       this.approvalWaiting = false
     },
-    async approveGeneration() {
-      if (!this.sessionId || !this.approvalWaiting) return
-      this.approvalWaiting = false
-      this.running = true
+    async _handleResume(sessionId: string, action: 'approve' | 'reject', hint?: string) {
       this.approvalError = ''
-      this.markStageComplete({ stage: 'approval', status: 'success', progress: 95 })
       try {
-        const result = await resumeGeneration(this.sessionId, 'approve')
+        const result = await resumeGeneration(sessionId, action, hint ?? '')
         if (result.success) {
           this.progress = 100
-          this.progressText = '审核通过，生成完成'
-          this.downloadPath = result.download_url ?? ''
-          this.resultMessage = `下载链接: ${result.download_url}`
           this.running = false
           this.approvalData = null
+          if (action === 'approve') {
+            this.progressText = '审核通过，生成完成'
+            this.downloadPath = result.download_url ?? ''
+            this.resultMessage = `下载链接: ${result.download_url}`
+          } else {
+            this.progressText = '审核驳回，但生成完成'
+          }
           this.refreshHistory()
         } else if (result.status === 'pending_approval' && result.interrupt) {
           // Re-approval needed (re-generate → re-eval → re-approval)
@@ -306,7 +319,6 @@ export const useTrafficStore = defineStore('traffic', {
           this.running = false
           this.progressText = '等待重新审核...'
           this.markStageStart({ stage: 'approval', name: '人工审核', progress: 95 })
-          // Add thought about re-approval
           this.thoughtSeq++
           this.thoughts.push({
             id: this.thoughtSeq,
@@ -314,7 +326,7 @@ export const useTrafficStore = defineStore('traffic', {
             ts: Date.now(),
           })
         } else {
-          this.errorMessage = result.message ?? '审核失败'
+          this.errorMessage = result.message ?? (action === 'approve' ? '审核失败' : '驳回失败')
           this.running = false
         }
       } catch (e: unknown) {
@@ -322,40 +334,18 @@ export const useTrafficStore = defineStore('traffic', {
         this.running = false
       }
     },
+    async approveGeneration() {
+      if (!this.sessionId || !this.approvalWaiting) return
+      this.approvalWaiting = false
+      this.running = true
+      this.markStageComplete({ stage: 'approval', status: 'success', progress: 95 })
+      await this._handleResume(this.sessionId, 'approve')
+    },
     async rejectGeneration(hint: string) {
       if (!this.sessionId || !this.approvalWaiting) return
       this.approvalWaiting = false
       this.running = true
-      this.approvalError = ''
-      try {
-        const result = await resumeGeneration(this.sessionId, 'reject', hint)
-        if (result.success) {
-          this.progress = 100
-          this.progressText = '审核驳回，但生成完成'
-          this.running = false
-          this.approvalData = null
-          this.refreshHistory()
-        } else if (result.status === 'pending_approval' && result.interrupt) {
-          // Re-approval needed
-          this.approvalData = result.interrupt
-          this.approvalWaiting = true
-          this.running = false
-          this.progressText = '等待重新审核...'
-          this.markStageStart({ stage: 'approval', name: '人工审核', progress: 95 })
-          this.thoughtSeq++
-          this.thoughts.push({
-            id: this.thoughtSeq,
-            text: `👤 重新生成完成，等待再次审核 — ${result.interrupt.record_count} 条记录`,
-            ts: Date.now(),
-          })
-        } else {
-          this.errorMessage = result.message ?? '驳回失败'
-          this.running = false
-        }
-      } catch (e: unknown) {
-        this.approvalError = e instanceof Error ? e.message : String(e)
-        this.running = false
-      }
+      await this._handleResume(this.sessionId, 'reject', hint)
     },
     dismissApproval() {
       this.approvalData = null

@@ -1,6 +1,6 @@
 # Traffic Agent 路线图与下一步指引
 
-**更新**: 2026-05-03
+**更新**: 2026-05-03  | **审查整改**: 2026-05-04
 **技术栈**: FastAPI + LangGraph + SQLite + Vue 3 + Pinia + Vite + Ollama (qwen2.5:7b)
 **环境**: Windows 10 + PowerShell + Ollama 本地
 
@@ -160,9 +160,11 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 
 ## 五、运行约束（非代码缺陷）
 
-### 5.1 v2.3 代码审查整改 (2026-05-04)
+### 5.1 v2.4 代码审查整改 (2026-05-04)
 
-基于 `docs/review.md` 全项目审查报告，完成以下修复：
+基于 `docs/review.md` 全项目审查报告 v1.0 + v2.0，完成以下修复：
+
+**v1.0 审查关闭（13 项）**：
 
 | 级别 | 修复项 | 状态 |
 |------|--------|------|
@@ -172,14 +174,31 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 🔴 C4 | `_dedupe_notes` 提取到 `app/core/utils.py` | ✅ |
 | 🔴 C5 | `_fix_json` 提取到 `app/core/json_utils.py` | ✅ |
 | 🔴 C6 | 数据库连接 `atexit.register` 清理 | ✅ |
-| 🟠 I7 | `nodes.py` 添加 DEPRECATED 注释 | ✅ |
+| 🟠 I7 | `nodes.py` 标记 DEPRECATED → **已删除** | ✅ |
 | 🟠 I9 | `on_event("startup")` → `lifespan` | ✅ |
 | 🟠 I11 | 异常传播 → `HTTPException(500)` | ✅ |
 | 🟠 I13 | `date_from`/`date_to` → `date` 类型 Pydantic 校验 | ✅ |
 | 🟠 I14 | `ChatOllama` 抽取到 `app/services/llm_factory.py` | ✅ |
 | 🟠 I15 | `approval_hint` 合并到 `eval_feedback` 传入子图 | ✅ |
+| 🟠 I8 | 行业映射统一到 `app/data/industries.py` 单一数据源，前后端共享 API | ✅ |
 
-## 五、运行约束（非代码缺陷）
+**v2.0 审查关闭（9 项）**：
+
+| 级别 | 修复项 | 状态 |
+|------|--------|------|
+| 🔴 P0-1 | API 速率限制（slowapi `SlowAPIMiddleware`，200/day） | ✅ |
+| 🔴 P0-2 | 全链路 Request ID 中间件（`X-Request-ID` header） | ✅ |
+| 🟠 P1-1 | 删除废弃 `nodes.py`（170 行死代码） | ✅ |
+| 🟠 P1-2 | `_random_body` 收归 `IndustryConfig.body_template` 声明式模板 | ✅ |
+| 🟢 P2-1 | 日志语言统一为英文（routes/generator/workers ~20 处） | ✅ |
+| 🟢 P2-2 | `langchain_service.py` 迁移到 `llm_factory.get_ollama_llm()` | ✅ |
+| 🟢 P2-3 | `GraphState` 字段按逻辑分组（7 组注释） | ✅ |
+| 🟢 P2-4 | Checkpoint 列表分页（`limit` + `before` cursor） | ✅ |
+| 🟢 P2-5 | Approval Worker 示例记录扩展 `rtt`/`duration` 字段 | ✅ |
+| 🟢 P2-6 | `trafficStore.ts` HITL 去重（`_handleResume()` 提取） | ✅ |
+| 🟢 P2-7 | 前端 Industries API 加载失败降级（`FALLBACK_INDUSTRIES` 静态列表） | ✅ |
+
+**待处理**：I12（aiosqlite 迁移）、P1-4（routes.py 拆分）
 
 以下问题源于本地 Ollama + qwen2.5:7b 模型能力限制，不是代码问题：
 
