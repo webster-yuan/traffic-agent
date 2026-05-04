@@ -2,7 +2,7 @@
 
 > 本文档介绍 Traffic Agent 项目中围绕 LangGraph Agent 架构的核心技术选型与落地要点，是面试/汇报场景下的技术深度参考。
 
-**更新**: 2026-05-03  
+**更新**: 2026-05-04  
 **技术栈**: LangGraph 1.x + LangChain + FastAPI + Ollama (qwen2.5:7b)
 
 ---
@@ -29,19 +29,27 @@ Supervisor-Worker 模式是 LangGraph 的 **"Hello World++"**——比简单的 
                     │  (ChatOllama) │  ── 分析 state → 输出 RouterDecision
                     └──────┬───────┘
                            │ conditional edge (route_supervisor)
-              ┌────────────┼──────────────┬─────────────┐
-              ▼            ▼              ▼             ▼
-         ┌────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-         │  RAG   │  │ Generate │  │   Eval   │  │ Identity │
-         │ Worker │  │  Worker  │  │  Worker  │  │  Worker  │
-         └───┬────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘
-             │            │             │             │
-             └────────────┴─────────────┴─────────────┘
+         ┌────────┬────────┼──────────┬──────────┬──────────┐
+         ▼        ▼        ▼          ▼          ▼          ▼
+    ┌────────┐┌──────────┐┌──────┐┌──────────┐┌──────────┐
+    │  RAG   ││ Generate ││ Eval ││ Approval ││ Identity │
+    │ Worker ││  Worker  ││Worker││  Worker  ││  Worker  │
+    └───┬────┘└────┬─────┘└──┬───┘└────┬─────┘└────┬─────┘
+        │          │         │         │           │
+        └──────────┴─────────┴─────────┴───────────┘
                            │ Command(goto="supervisor")
                            ▼
                     ┌──────────────┐
                     │  Supervisor  │  ← 循环回到决策中心
-                    └──────────────┘
+                    └──────┬───────┘
+                           │
+              HITL 审批中断 (full 模式):
+              Approval Worker → interrupt()
+                  │
+          ┌───────┴───────┐
+          ▼               ▼
+       Approve          Reject
+       → Identity       → Generate (重生成)
 ```
 
 **核心机制**:
@@ -61,7 +69,7 @@ Supervisor-Worker 模式是 LangGraph 的 **"Hello World++"**——比简单的 
 
 ```python
 class RouterDecision(BaseModel):
-    next: Literal["rag", "generate", "eval", "identity", "FINISH"]
+    next: Literal["rag", "generate", "eval", "approval", "identity", "FINISH"]
     reason: str
 
 structured_llm = llm.with_structured_output(RouterDecision, method="json_mode")
@@ -118,14 +126,16 @@ result = await subgraph.ainvoke(sub_state)
 
 **落地要点**:
 - 子图有自己的独立 State，与父图 State 隔离
-- 子图节点在 `astream_events` 中有独立的 namespace，可实现细粒度 SSE 追踪
+- 子图节点在 `astream(stream_mode=["updates","custom"])` 中有独立的 namespace，可实现细粒度 SSE 追踪
 - 子图可独立测试（`test_generate_subgraph.py`），不需启动完整 Supervisor 流程
 
-### 2.4 流式思考链：SSE Thought Events
+### 2.4 流式思考链：SSE Thought Events (v1 / legacy)
+
+> **注意**: 以下描述的是项目最初基于 `astream_events` v1 API 的实现。当前已升级至 §2.4.1 的 Custom Streaming 方案（`astream(stream_mode=["updates","custom"])`），保留此节作为技术演进记录。
 
 **问题**: 本地的 qwen2.5:7b 生成慢（单条 2-5s），用户如果不看到进度会认为系统卡死。
 
-**方案**: 利用 LangGraph 的 `astream_events` v1 API，将 Supervisor 决策和 LLM 活动转为 SSE 事件推送到前端：
+**方案 (legacy)**: 利用 LangGraph 的 `astream_events` v1 API，将 Supervisor 决策和 LLM 活动转为 SSE 事件推送到前端：
 
 | SSE Event | 触发时机 | 前端展示 |
 |-----------|---------|---------|
@@ -303,7 +313,7 @@ def evaluate_quality(records, industry) -> QualityScore: ...
 
 ### 3.2 SSE 阶段进度
 
-- `stage_start` / `stage_complete` 事件：四阶段进度条
+- `stage_start` / `stage_complete` 事件：五阶段进度条 (RAG/生成/评估/审批/身份校验)
 - `progress` 事件：百分比进度
 - 所有事件带 `session_id`，前端可同时追踪多个并发会话
 
@@ -316,14 +326,13 @@ def evaluate_quality(records, industry) -> QualityScore: ...
 | 限制 | 原因 | 影响 |
 |------|------|------|
 | 取消不立即中断 LLM | LLM 调用期间无法检查取消标记 | 取消延迟 = LLM 剩余调用时长 |
-| 质量重试无硬上限 | Supervisor 仅建议重试，无全局计数 | qwen2.5:7b 可能陷入重试循环 |
 | RAG 为静态示例 | 读文件而非向量检索 | 无法利用成功案例自我进化 |
 
 ### 后续提升方向（详见 ROADMAP.md 第六节）
 
 1. **真 RAG 向量检索 (ChromaDB)** — 静态示例 → 动态知识库
-2. **质量重试硬上限 + 降级策略** — 修复重试循环
-3. **Prompt 自优化反馈闭环** — 利用评估结果反向改进 prompt
+2. **Docker 容器化部署** — 解决环境依赖问题
+3. **API 鉴权** — 引入 JWT 或 API Key 机制
 
 ---
 
@@ -333,7 +342,7 @@ def evaluate_quality(records, industry) -> QualityScore: ...
 |------|------|
 | `backend/app/graph/workflow.py` | Supervisor-Worker 图编译 + Send() 并行路由 |
 | `backend/app/graph/supervisor.py` | Supervisor 决策节点 + fallback 路由 |
-| `backend/app/graph/workers.py` | 4 个 Worker 实现（RAG / Generate / Eval / Identity） |
+| `backend/app/graph/workers.py` | 5 个 Worker 实现（RAG / Generate / Eval / Approval / Identity） |
 | `backend/app/graph/generate_subgraph.py` | Generate 子图（prompt→LLM→parse） |
 | `backend/app/graph/state.py` | `GraphState` TypedDict 定义 |
 | `backend/app/api/routes.py` | SSE 流式端点 + thought 事件发射 |
