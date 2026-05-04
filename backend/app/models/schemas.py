@@ -74,7 +74,7 @@ class TrafficGenerateResponse(BaseModel):
     success: bool
     session_id: str
     total_count: int
-    quality_score: QualityScore
+    quality_score: QualityScore | None  # None when GraphInterrupt pauses graph
     generated_data: list[TrafficRecord]
     processing_time_ms: int
 

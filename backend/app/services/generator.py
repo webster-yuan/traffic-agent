@@ -12,9 +12,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from langchain_ollama import ChatOllama
-
+from app.services.llm_factory import get_ollama_llm
 from app.core.config import settings
+from app.core.json_utils import fix_json
+from app.core.utils import dedupe_notes
 from app.models.schemas import QualityScore, Stage, TrafficRecord
 from app.services.quality_validator import validate_business, validate_format
 
@@ -26,18 +27,6 @@ else:
         def decorator(func):
             return func
         return decorator
-
-
-def _fix_json(text: str) -> str:
-    text = text.strip()
-    if not text:
-        raise ValueError("Empty content")
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text)
-        text = text.strip("`")
-    text = text.replace("'", '"')
-    text = re.sub(r",(\s*[}\]])", r"\1", text)
-    return text
 
 
 @traceable(name="infer_scenario")
@@ -207,12 +196,7 @@ async def generate_records_by_llm(count: int, stage: Stage, industry: str, scena
 参考样例:
 {examples_str}"""
 
-        llm = ChatOllama(
-            model=settings.ollama_model,
-            base_url=settings.ollama_base_url,
-            temperature=0.3,
-            timeout=_get_llm_timeout(),
-        )
+        llm = get_ollama_llm(temperature=0.3)
 
         timeout = _get_llm_timeout()
         response = await asyncio.wait_for(
@@ -228,7 +212,7 @@ async def generate_records_by_llm(count: int, stage: Stage, industry: str, scena
             result = json.loads(content.strip())
         except json.JSONDecodeError as e:
             logger.warning(f"JSON解析失败，尝试修复: {e}")
-            fixed = _fix_json(content.strip())
+            fixed = fix_json(content.strip())
             result = json.loads(fixed)
 
         if not isinstance(result, list):
@@ -313,19 +297,6 @@ def generate_records(count: int, stage: Stage, industry: str) -> list[TrafficRec
     return result
 
 
-def _dedupe_notes(notes: list[str], cap: int = 16) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for n in notes:
-        n = n.strip()
-        if n and n not in seen:
-            seen.add(n)
-            out.append(n)
-        if len(out) >= cap:
-            break
-    return out
-
-
 def _score_format(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     """Pandera-backed format validation → (score, notes)."""
     return validate_format(records)
@@ -369,7 +340,7 @@ def _score_diversity(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     score = round(url_score + method_score + status_score + identity_score, 1)
     if not notes:
         notes.append("本维度各子项（URL/方法/状态码/身份）覆盖度可接受，扣分点较少")
-    return score, _dedupe_notes(notes, cap=8)
+    return score, dedupe_notes(notes, cap=8)
 
 
 @traceable(

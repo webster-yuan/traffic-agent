@@ -7,6 +7,8 @@ Pandera schemas, yielding per-record / per-field structured failure reports.
 from __future__ import annotations
 
 import re
+
+from app.core.utils import dedupe_notes
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -270,7 +272,7 @@ def validate_format(records: list[TrafficRecord]) -> tuple[float, list[str]]:
     schema = TrafficFormatSchema.to_schema()
     notes, passed, total = _check_to_failure_count(df, schema)
     score = round(passed / total * 100, 1)
-    return score, _dedupe_notes(notes)
+    return score, dedupe_notes(notes)
 
 
 def validate_business(records: list[TrafficRecord], industry: str) -> tuple[float, list[str]]:
@@ -319,17 +321,7 @@ def validate_business(records: list[TrafficRecord], industry: str) -> tuple[floa
     passed_all = passed + extra_checks_passed
     all_notes = notes + extra_notes
     score = round(passed_all / max(total_all, 1) * 100, 1)
-    return score, _dedupe_notes(all_notes)
+    return score, dedupe_notes(all_notes)
 
 
-def _dedupe_notes(notes: list[str], cap: int = 16) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for n in notes:
-        n = n.strip()
-        if n and n not in seen:
-            seen.add(n)
-            out.append(n)
-        if len(out) >= cap:
-            break
-    return out
+

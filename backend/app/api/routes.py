@@ -3,6 +3,7 @@ import json
 import time
 import uuid
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any, AsyncGenerator, Literal
 
@@ -127,8 +128,9 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             processing_time_ms=int((time.perf_counter() - start_at) * 1000),
         )
     except Exception as e:
+        logger.exception("session_id=%s generation failed", session_id)
         fail_session(session_id, str(e))
-        raise
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         _release()
 
@@ -617,8 +619,8 @@ async def get_history(
     industry: str | None = Query(default=None, description="行业过滤"),
     stage: str | None = Query(default=None, description="阶段过滤 (quick/standard/full)"),
     status: str | None = Query(default=None, description="状态过滤 (completed/failed/cancelled)"),
-    date_from: str | None = Query(default=None, description="起始日期 (YYYY-MM-DD)"),
-    date_to: str | None = Query(default=None, description="结束日期 (YYYY-MM-DD)"),
+    date_from: date | None = Query(default=None, description="起始日期 (YYYY-MM-DD)"),
+    date_to: date | None = Query(default=None, description="结束日期 (YYYY-MM-DD)"),
     min_quality: float | None = Query(default=None, ge=0, le=100, description="最低评分 (0-100)"),
 ) -> dict:
     total, items = list_history(
@@ -627,8 +629,8 @@ async def get_history(
         industry=industry,
         stage=stage,
         status=status,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=date_from.isoformat() if date_from else None,
+        date_to=date_to.isoformat() if date_to else None,
         min_quality=min_quality,
     )
     total_pages = (total + page_size - 1) // page_size

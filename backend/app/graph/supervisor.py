@@ -15,13 +15,13 @@ import logging
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
 from langgraph.config import get_stream_writer
 from langgraph.types import Command, Send
 
 from app.core.config import settings
 from app.graph.state import GraphState
-from app.models.schemas import RouterDecision, Stage
+from app.models.schemas import QualityScore, RouterDecision, Stage
+from app.services.llm_factory import get_ollama_llm
 
 logger = logging.getLogger(__name__)
 
@@ -195,12 +195,7 @@ async def supervisor_node(
     system = SystemMessage(content=_SYSTEM_PROMPT)
     all_msgs = [system] + messages
 
-    llm = ChatOllama(
-        model=settings.ollama_model,
-        base_url=settings.ollama_base_url,
-        temperature=0.1,
-        timeout=getattr(settings, "llm_timeout", 300),
-    )
+    llm = get_ollama_llm(temperature=0.1)
 
     # Build a state summary for the supervisor to reason about
     state_summary_parts: list[str] = [

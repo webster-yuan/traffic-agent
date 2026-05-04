@@ -26,6 +26,7 @@ class Settings(BaseModel):
     llm_timeout: int = 300
     cleanup_days: int = 30
     cleanup_interval_hours: int = 24
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
 
 settings = Settings()

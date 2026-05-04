@@ -18,6 +18,7 @@ from langgraph.types import Command, interrupt
 
 from app.core.state import is_cancelled
 from app.graph.generate_subgraph import build_generate_subgraph
+from app.graph.shared import check_cancelled as _check_cancelled
 from app.graph.state import GraphState
 from app.models.schemas import QualityScore, Stage, TrafficRecord
 from app.services.generator import (
@@ -27,11 +28,6 @@ from app.services.generator import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _check_cancelled(session_id: str) -> None:
-    if is_cancelled(session_id):
-        raise RuntimeError("Task cancelled by user")
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +113,16 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
 
     logger.info("[Generate Worker] session=%s count=%d (via subgraph)", session_id, count)
 
+    # Merge eval_feedback and approval_hint for self-optimization (I15)
+    eval_feedback: str = state.get("eval_feedback", "")  # type: ignore[assignment]
+    approval_hint: str = state.get("approval_hint", "")  # type: ignore[assignment]
+    combined_feedback: str = eval_feedback
+    if approval_hint:
+        hint_line = f"● 人工审核反馈: {approval_hint}"
+        combined_feedback = (
+            f"{eval_feedback}\n{hint_line}" if eval_feedback else hint_line
+        )
+
     # Build initial subgraph state from parent state
     sub_state = {
         "industry": industry,
@@ -127,7 +133,7 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
         "raw_response": "",
         "records": [],
         "error": "",
-        "eval_feedback": state.get("eval_feedback", ""),  # P3.7 self-optimization
+        "eval_feedback": combined_feedback,  # P3.7 + I15: merged feedback
     }
 
     subgraph = build_generate_subgraph()

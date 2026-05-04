@@ -114,7 +114,7 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 项目 | 说明 | 建议 |
 |------|------|------|
 | `/generate` sync 端点冗余 | 与 `/generate/stream` 逻辑重复 60 行 | 保留兼容，标记 deprecated |
-| `on_event("startup")` 已 deprecated | FastAPI 推荐 lifespan context manager | 下次改 `main.py` 时顺手改 |
+| `on_event("startup")` 已 deprecated | FastAPI 推荐 lifespan context manager | ✅ 已修复 (v2.3) |
 | API 鉴权缺失 | CORS `*`，无 token | Docker 部署时加 API Key / JWT |
 
 ---
@@ -157,6 +157,27 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 定时批量 | Celery Beat + Cron | 每日自动生成 + 自动导出周报 PDF |
 
 ---
+
+## 五、运行约束（非代码缺陷）
+
+### 5.1 v2.3 代码审查整改 (2026-05-04)
+
+基于 `docs/review.md` 全项目审查报告，完成以下修复：
+
+| 级别 | 修复项 | 状态 |
+|------|--------|------|
+| 🔴 C1 | CORS 限制具体 origin（`settings.cors_origins`） | ✅ |
+| 🔴 C2 | `TrafficGenerateResponse.quality_score` → `QualityScore \| None` | ✅ |
+| 🔴 C3 | `_check_cancelled` 提取到 `app/graph/shared.py` | ✅ |
+| 🔴 C4 | `_dedupe_notes` 提取到 `app/core/utils.py` | ✅ |
+| 🔴 C5 | `_fix_json` 提取到 `app/core/json_utils.py` | ✅ |
+| 🔴 C6 | 数据库连接 `atexit.register` 清理 | ✅ |
+| 🟠 I7 | `nodes.py` 添加 DEPRECATED 注释 | ✅ |
+| 🟠 I9 | `on_event("startup")` → `lifespan` | ✅ |
+| 🟠 I11 | 异常传播 → `HTTPException(500)` | ✅ |
+| 🟠 I13 | `date_from`/`date_to` → `date` 类型 Pydantic 校验 | ✅ |
+| 🟠 I14 | `ChatOllama` 抽取到 `app/services/llm_factory.py` | ✅ |
+| 🟠 I15 | `approval_hint` 合并到 `eval_feedback` 传入子图 | ✅ |
 
 ## 五、运行约束（非代码缺陷）
 

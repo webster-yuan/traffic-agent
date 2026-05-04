@@ -1,9 +1,16 @@
+"""DEPRECATED: Legacy graph nodes — use workers.py in Supervisor-Worker architecture.
+
+These functions are retained for backward compatibility with existing tests.
+New code should use the worker functions in ``app.graph.workers``.
+"""
+
 import os
 import logging
 from typing import Any
 
 from app.core.config import settings
 from app.core.state import is_cancelled
+from app.graph.shared import check_cancelled as _check_cancelled
 from app.graph.state import GraphState
 from app.models.schemas import QualityScore, Stage
 from app.services.generator import evaluate_quality, generate_records_by_llm, infer_scenario
@@ -19,11 +26,6 @@ else:
             return func
         return decorator
 
-
-def _check_cancelled(session_id: str) -> None:
-    """检查任务是否被取消"""
-    if is_cancelled(session_id):
-        raise RuntimeError("Task cancelled by user")
 
 
 def _default_quality() -> QualityScore:

@@ -1,3 +1,4 @@
+import atexit
 import sqlite3
 import threading
 from pathlib import Path
@@ -22,10 +23,24 @@ def get_connection() -> sqlite3.Connection:
     if not hasattr(_thread_local, "conn"):
         db_path = Path(settings.sqlite_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         _thread_local.conn = conn
     return _thread_local.conn
+
+
+def _close_connection() -> None:
+    """Close thread-local database connection on thread exit."""
+    conn = getattr(_thread_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        delattr(_thread_local, "conn")
+
+
+atexit.register(_close_connection)
 
 
 def init_db() -> None:

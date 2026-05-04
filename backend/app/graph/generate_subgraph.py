@@ -21,13 +21,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypedDict
 
-from langchain_ollama import ChatOllama
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from app.core.config import settings
+from app.core.json_utils import fix_json
 from app.models.schemas import Stage, TrafficRecord
 from app.services.generator import _get_examples, _industry_context
+from app.services.llm_factory import get_ollama_llm
 
 logger = logging.getLogger(__name__)
 
@@ -61,17 +62,6 @@ class GenerateSubState(TypedDict, total=False):
 # Node 1: prepare_prompt
 # ---------------------------------------------------------------------------
 
-
-def _fix_json(text: str) -> str:
-    text = text.strip()
-    if not text:
-        raise ValueError("Empty content")
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text)
-        text = text.strip("`")
-    text = text.replace("'", '"')
-    text = re.sub(r",(\s*[}\]])", r"\1", text)
-    return text
 
 
 async def prepare_prompt_node(state: GenerateSubState) -> dict[str, Any]:
@@ -168,14 +158,9 @@ async def call_llm_node(state: GenerateSubState) -> dict[str, Any]:
     if not prompt:
         return {"error": "prompt is empty", "raw_response": ""}
 
-    llm = ChatOllama(
-        model=settings.ollama_model,
-        base_url=settings.ollama_base_url,
-        temperature=0.3,
-        timeout=getattr(settings, "llm_timeout", 300),
-    )
+    llm = get_ollama_llm(temperature=0.3)
 
-    timeout = getattr(settings, "llm_timeout", 300)
+    timeout = settings.llm_timeout
     logger.info("[GenerateSub] calling LLM (model=%s, timeout=%ds)", settings.ollama_model, timeout)
 
     # ── Custom streaming: LLM call started ────────────────────────────
@@ -245,7 +230,7 @@ async def parse_result_node(state: GenerateSubState) -> dict[str, Any]:
     except json.JSONDecodeError:
         logger.warning("[GenerateSub] JSON parse failed, attempting repair")
         try:
-            fixed = _fix_json(raw.strip())
+            fixed = fix_json(raw.strip())
             result = json.loads(fixed)
         except Exception as e:
             logger.error("[GenerateSub] JSON repair also failed: %s", e)
