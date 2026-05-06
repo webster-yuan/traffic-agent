@@ -51,6 +51,8 @@ from app.services.session_service import (
 from app.services.report_service import generate_report_html
 from app.data.industries import get_industries_for_frontend
 from app.core.state import add_cancelled, is_cancelled, remove_cancelled
+from app.services.system_metrics import get_metrics
+from app.services.token_counter import get_token_counter
 
 router = APIRouter(prefix="/api/v1/traffic", tags=["traffic"])
 
@@ -106,13 +108,23 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             file_path=file_path,
             quality=quality,
         )
+        # ── Record metrics ────────────────────────────────────────────
+        processing_time = int((time.perf_counter() - start_at) * 1000)
+        get_metrics().record_request(
+            session_id=session_id,
+            industry=payload.industry,
+            stage=payload.stage.value,
+            record_count=len(records),
+            processing_time_ms=processing_time,
+            success=True,
+        )
         return TrafficGenerateResponse(
             success=True,
             session_id=session_id,
             total_count=len(records),
             quality_score=quality,
             generated_data=records,
-            processing_time_ms=int((time.perf_counter() - start_at) * 1000),
+            processing_time_ms=processing_time,
         )
     except GraphInterrupt as gi:
         # Human-in-the-Loop: graph paused — non-streaming mode cannot handle this
@@ -130,6 +142,15 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
         )
     except Exception as e:
         logger.exception("session_id=%s generation failed", session_id)
+        get_metrics().record_request(
+            session_id=session_id,
+            industry=payload.industry,
+            stage=payload.stage.value,
+            record_count=0,
+            processing_time_ms=int((time.perf_counter() - start_at) * 1000),
+            success=False,
+            error=str(e),
+        )
         fail_session(session_id, str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
@@ -158,6 +179,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
     logger.info("session_id=%s lock acquired", session_id)
 
     async def event_stream() -> AsyncGenerator[str, None]:
+        stream_start = time.perf_counter()
         try:
             logger.info("session_id=%s started stream processing", session_id)
             graph = get_traffic_graph()
@@ -355,6 +377,17 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                 record_count=len(records),
                 file_path=file_path,
                 quality=quality,
+            )
+            
+            # ── Record metrics ────────────────────────────────────────
+            processing_time = int((time.perf_counter() - stream_start) * 1000)
+            get_metrics().record_request(
+                session_id=session_id,
+                industry=payload.industry,
+                stage=payload.stage.value,
+                record_count=len(records),
+                processing_time_ms=processing_time,
+                success=True,
             )
             
             # 发送完成事件
@@ -806,3 +839,92 @@ async def get_industries():
     from app.models.schemas import IndustryItem
     data = get_industries_for_frontend()
     return [IndustryItem(**item) for item in data]
+
+
+# ---------------------------------------------------------------------------
+# Observability endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/metrics")
+async def get_system_metrics() -> dict:
+    """Return system performance metrics.
+
+    Includes throughput, latency percentiles (P50/P95/P99),
+    success rate, token statistics, and uptime.
+    """
+    metrics = get_metrics().stats()
+    token_stats = get_token_counter().stats()
+    return {
+        **metrics,
+        "token_usage": token_stats,
+        "concurrency": {
+            "max_slots": 3,
+        },
+    }
+
+
+@router.get("/model-info")
+async def get_model_info() -> dict:
+    """Return current LLM model configuration and capabilities.
+
+    Useful for monitoring which model serves traffic generation
+    and its operational parameters.
+    """
+    from app.core.config import settings
+    return {
+        "model": settings.ollama_model,
+        "base_url": settings.ollama_base_url,
+        "max_retries": settings.max_retry_count,
+        "llm_timeout_seconds": settings.llm_timeout,
+        "context_window_estimate": 32768,
+        "capabilities": [
+            "structured_output_json_mode",
+            "streaming",
+            "tool_calling_via_langgraph",
+        ],
+        "supported_stages": ["quick", "standard", "full"],
+        "quality_dimensions": ["format", "business", "diversity"],
+        "quality_threshold": 70,
+    }
+
+
+@router.post("/batch/{batch_id}/retry-failed")
+async def retry_failed_batch_tasks(batch_id: str) -> dict:
+    """Retry all failed tasks in a batch.
+
+    Only retries tasks with status 'failed' — completed tasks are left untouched.
+    """
+    tasks_rows = get_batch_tasks(batch_id)
+    if not tasks_rows:
+        raise HTTPException(status_code=404, detail="批次不存在")
+
+    failed_tasks = [row for row in tasks_rows if row["status"] == "failed"]
+    if not failed_tasks:
+        return {"success": True, "batch_id": batch_id, "retried": 0, "message": "没有失败的任务"}
+
+    for row in failed_tasks:
+        from app.models.schemas import Stage as StageEnum
+
+        payload = TrafficGenerateRequest(
+            industry=row["industry"],
+            count=row["count"],
+            stage=StageEnum(row["stage"]),
+        )
+        asyncio.create_task(
+            _run_single_task(
+                batch_id=batch_id,
+                task_index=row["task_index"],
+                session_id=row["session_id"],
+                industry=row["industry"],
+                stage=row["stage"],
+                count=row["count"],
+            )
+        )
+
+    return {
+        "success": True,
+        "batch_id": batch_id,
+        "retried": len(failed_tasks),
+        "message": f"已重试 {len(failed_tasks)} 个失败任务",
+    }
