@@ -29,6 +29,7 @@ from app.core.json_utils import fix_json
 from app.models.schemas import Stage, TrafficRecord
 from app.services.generator import _get_examples, _industry_context
 from app.services.llm_factory import get_ollama_llm
+from app.services.token_counter import record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,9 @@ async def call_llm_node(state: GenerateSubState) -> dict[str, Any]:
         if not content:
             return {"error": "LLM returned empty content", "raw_response": ""}
         logger.info("[GenerateSub] LLM response received: %d chars", len(content))
+
+        # ── Record token usage from response metadata ─────────────────
+        record_llm_call(response)
 
         # ── Custom streaming: LLM response received ───────────────────
         try:
