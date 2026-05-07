@@ -185,6 +185,16 @@ export type GenerateProgress = {
   timeout?: number
 }
 
+// Token Usage: per-LLM-call token consumption sent via SSE
+export type TokenUsage = {
+  type: 'token_usage'
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  duration_ms: number
+  tokens_per_second: number
+}
+
 // P2.2 Human-in-the-Loop: approval required interrupt payload
 export type ApprovalRequired = {
   type: 'approval_required'
@@ -242,6 +252,7 @@ export function generateTrafficStream(
   onThoughtDecision?: (decision: ThoughtDecision) => void,
   onThoughtToken?: (data: { node: string; content: string }) => void,
   onGenerateProgress?: (progress: GenerateProgress) => void,
+  onTokenUsage?: (usage: TokenUsage) => void,
   onWaitingForApproval?: (data: ApprovalRequired) => void,
   signal?: AbortSignal
 ) {
@@ -294,6 +305,9 @@ export function generateTrafficStream(
               break
             case 'generate_progress':
               onGenerateProgress?.(data)
+              break
+            case 'token_usage':
+              onTokenUsage?.(data as TokenUsage)
               break
             case 'waiting_for_approval':
               streamFinished = true
@@ -450,4 +464,66 @@ export async function replayTraffic(payload: ReplayPayload) {
     throw new Error(await responseErrorMessage(res))
   }
   return res.json()
+}
+
+// ── Observability / System Info endpoints ──
+
+export interface MetricsResponse {
+  total_requests: number
+  success_count: number
+  failure_count: number
+  success_rate: number
+  avg_latency_ms: number
+  p50_latency_ms: number
+  p95_latency_ms: number
+  p99_latency_ms: number
+  throughput_rps: number
+  token_usage: {
+    total_calls: number
+    total_prompt_tokens: number
+    total_completion_tokens: number
+    total_tokens: number
+    avg_prompt_tokens: number
+    avg_completion_tokens: number
+    total_duration_ms: number
+    tokens_per_second: number
+  }
+  concurrency: {
+    max_slots: number
+  }
+}
+
+export interface ModelInfo {
+  model_name: string
+  provider: string
+  capabilities: string[]
+  stages: string[]
+  quality_threshold: number
+  context_window: number
+}
+
+export async function fetchMetrics(): Promise<MetricsResponse> {
+  const res = await fetch(`${API_BASE}/metrics`)
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json()
+}
+
+export async function fetchModelInfo(): Promise<ModelInfo> {
+  const res = await fetch(`${API_BASE}/model-info`)
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json()
+}
+
+export async function retryBatchFailed(batchId: string) {
+  const res = await fetch(`${API_BASE}/batch/${batchId}/retry-failed`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res))
+  }
+  return res.json() as Promise<{ success: boolean; batch_id: string; retried: number }>
 }

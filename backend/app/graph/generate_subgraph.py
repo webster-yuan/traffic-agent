@@ -29,7 +29,7 @@ from app.core.json_utils import fix_json
 from app.models.schemas import Stage, TrafficRecord
 from app.services.generator import _get_examples, _industry_context
 from app.services.llm_factory import get_ollama_llm
-from app.services.token_counter import record_llm_call
+from app.services.token_counter import extract_from_response, record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +243,26 @@ async def call_llm_node(state: GenerateSubState) -> dict[str, Any]:
 
         # ── Record token usage from response metadata ─────────────────
         record_llm_call(response)
+        token_info = extract_from_response(response)
+
+        # ── Send token_usage via SSE for frontend display ─────────────
+        try:
+            prompt = token_info["prompt_tokens"]
+            completion = token_info["completion_tokens"]
+            total = prompt + completion
+            duration_ms = token_info["total_duration_ns"] // 1_000_000
+            tps = round(total / (duration_ms / 1000), 1) if duration_ms > 0 else 0
+            writer = get_stream_writer()
+            writer({
+                "type": "token_usage",
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": total,
+                "duration_ms": duration_ms,
+                "tokens_per_second": tps,
+            })
+        except RuntimeError:
+            pass
 
         # ── Custom streaming: LLM response received ───────────────────
         try:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useTrafficStore } from '../stores/trafficStore'
 import type { Stage } from '../api/trafficApi'
 
@@ -8,6 +8,10 @@ const batchItems = ref<Array<{ industry: string; count: number; stage: Stage }>>
 const batchIndustry = ref('ride_hailing')
 const batchStage = ref<Stage>('quick')
 const batchCount = ref(2)
+
+const hasFailedTasks = computed(() =>
+  store.batchTasks.some((t) => t.status === 'failed')
+)
 
 function addBatchItem() {
   if (batchItems.value.length >= 10) return
@@ -99,6 +103,13 @@ function batchStatusText(status: string) {
         <span v-if="task.error_message" class="batch-task-error">{{ task.error_message }}</span>
       </div>
       <button v-if="!store.batchRunning && store.batchTasks.length > 0" class="ghost neutral" @click="store.resetBatch()">关闭</button>
+      <button
+        v-if="hasFailedTasks && !store.batchRunning"
+        class="retry-btn"
+        @click="store.retryFailedBatchTasks()"
+      >
+        🔄 重试失败任务
+      </button>
     </div>
   </section>
 </template>

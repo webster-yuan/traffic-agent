@@ -46,8 +46,8 @@ async def rag_worker(state: GraphState) -> Command[dict[str, Any]]:  # type: ign
         writer({
             "type": "stage_start",
             "node": "rag",
-            "name": "RAGæ£ç´¢",
-            "message": f"æ£ç´¢ {industry} è¡ä¸æ¡ä¾å¹¶æ¨æ­åºæ¯",
+            "name": "RAG检索",
+            "message": f"检索 {industry} 行业案例并推断场景",
         })
     except RuntimeError:
         pass
@@ -101,8 +101,8 @@ async def generate_worker(state: GraphState) -> Command[dict[str, Any]]:  # type
         writer({
             "type": "stage_start",
             "node": "generate",
-            "name": "æµéçæ",
-            "message": f"æ ¹æ®åºæ¯åæ¡ä¾è°ç¨ LLM çæ {count} æ¡æµéè®°å½",
+            "name": "流量生成",
+            "message": f"根据场景和案例调用 LLM 生成 {count} 条流量记录",
         })
     except RuntimeError:
         pass

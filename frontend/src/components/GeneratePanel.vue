@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useTrafficStore } from '../stores/trafficStore'
 import type { Stage } from '../api/trafficApi'
 
@@ -8,6 +8,30 @@ const industry = ref('ride_hailing')
 const stage = ref<Stage>('standard')
 const count = ref(100)
 const rejectHint = ref('')
+
+onMounted(() => {
+  store.loadModelInfo()
+})
+
+const totalTokenUsage = computed(() => {
+  const usages = store.tokenUsages
+  if (usages.length === 0) return null
+  return {
+    calls: usages.length,
+    prompt_tokens: usages.reduce((s, u) => s + u.prompt_tokens, 0),
+    completion_tokens: usages.reduce((s, u) => s + u.completion_tokens, 0),
+    total_tokens: usages.reduce((s, u) => s + u.total_tokens, 0),
+    total_duration_ms: usages.reduce((s, u) => s + u.duration_ms, 0),
+    avg_tokens_per_second: usages.length > 0
+      ? Math.round(usages.reduce((s, u) => s + u.tokens_per_second, 0) / usages.length)
+      : 0,
+  }
+})
+
+function formatTokenCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
 
 async function onSubmit() {
   await store.startGenerate({
@@ -33,7 +57,12 @@ function stageStatusText(status: string) {
 
 <template>
   <section class="panel">
-    <h1>Traffic Agent 控制台</h1>
+    <h1>
+      Traffic Agent 控制台
+      <span v-if="store.modelInfo" class="model-badge" :title="`Provider: ${store.modelInfo.provider} | Context: ${store.modelInfo.context_window} tokens`">
+        🤖 {{ store.modelInfo.model_name }}
+      </span>
+    </h1>
     <p class="desc">主Agent协调前后端：当前运行单并发、最多重试3次并返回最新结果。</p>
 
     <div class="form-grid">
@@ -186,5 +215,36 @@ function stageStatusText(status: string) {
       <span class="meta-inline">{{ store.downloadPath }}</span>
     </p>
     <p v-else class="result">{{ store.resultMessage }}</p>
+
+    <!-- Token Usage Stats -->
+    <div v-if="totalTokenUsage && !store.running" class="token-stats">
+      <div class="token-header">📊 Token 消耗统计</div>
+      <div class="token-grid">
+        <div class="token-item">
+          <strong>{{ totalTokenUsage.calls }}</strong>
+          <span>LLM 调用</span>
+        </div>
+        <div class="token-item">
+          <strong>{{ formatTokenCount(totalTokenUsage.prompt_tokens) }}</strong>
+          <span>输入 Tokens</span>
+        </div>
+        <div class="token-item">
+          <strong>{{ formatTokenCount(totalTokenUsage.completion_tokens) }}</strong>
+          <span>输出 Tokens</span>
+        </div>
+        <div class="token-item">
+          <strong>{{ formatTokenCount(totalTokenUsage.total_tokens) }}</strong>
+          <span>总计 Tokens</span>
+        </div>
+        <div class="token-item">
+          <strong>{{ (totalTokenUsage.total_duration_ms / 1000).toFixed(1) }}s</strong>
+          <span>LLM 总耗时</span>
+        </div>
+        <div class="token-item">
+          <strong>{{ totalTokenUsage.avg_tokens_per_second }} t/s</strong>
+          <span>生成速度</span>
+        </div>
+      </div>
+    </div>
   </section>
 </template>

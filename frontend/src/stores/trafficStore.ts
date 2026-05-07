@@ -4,12 +4,14 @@ import {
   deleteHistory,
   downloadUrl,
   fetchIndustries,
+  fetchModelInfo,
   generateTrafficStream,
   getBatchStatus,
   langsmithTraceUrl,
   listHistory,
   reportUrl,
   resumeGeneration,
+  retryBatchFailed,
   startBatch,
   type ApprovalRequired,
   type BatchTaskItem,
@@ -18,11 +20,13 @@ import {
   type HistoryFilters,
   type HistoryItem,
   type IndustryItem,
+  type ModelInfo,
   type StageComplete,
   type StageProgress,
   type Thought,
   type ThoughtDecision,
   type GenerateProgress,
+  type TokenUsage,
 } from '../api/trafficApi'
 
 const STAGE_NAME: Record<string, string> = {
@@ -30,6 +34,7 @@ const STAGE_NAME: Record<string, string> = {
   generate: '流量生成',
   eval: '质量评估',
   identity: '身份校验',
+  approval: '人工审核',
 }
 
 type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -112,6 +117,10 @@ export const useTrafficStore = defineStore('traffic', {
     approvalWaiting: false,
     approvalResult: null as string | null,
     approvalError: '',
+    // Token usage tracking per generation request
+    tokenUsages: [] as TokenUsage[],
+    // Model info loaded from backend
+    modelInfo: null as ModelInfo | null,
   }),
   getters: {
   },
@@ -199,6 +208,7 @@ export const useTrafficStore = defineStore('traffic', {
       this.downloadPath = ''
       this.thoughts = []
       this.thoughtSeq = 0
+      this.tokenUsages = []
       this.approvalData = null
       this.approvalWaiting = false
       this.approvalError = ''
@@ -267,6 +277,9 @@ export const useTrafficStore = defineStore('traffic', {
                 ? '✅'
                 : '📝'
           addThought(`${icon} ${progress.message}`)
+        },
+        (usage: TokenUsage) => {
+          this.tokenUsages.push(usage)
         },
         (approvalData: ApprovalRequired) => {
           // HITL: graph paused, waiting for human approval
@@ -401,6 +414,24 @@ export const useTrafficStore = defineStore('traffic', {
       this.batchId = ''
       this.batchTasks = []
       this.batchRunning = false
+    },
+    async loadModelInfo() {
+      try {
+        this.modelInfo = await fetchModelInfo()
+      } catch {
+        console.warn('[TrafficStore] Failed to fetch model info')
+      }
+    },
+    async retryFailedBatchTasks() {
+      if (!this.batchId) return
+      try {
+        const result = await retryBatchFailed(this.batchId)
+        this.batchRunning = true
+        this.progressText = `正在重试 ${result.retried} 个失败任务...`
+        this._pollBatch()
+      } catch (e: unknown) {
+        console.error('[TrafficStore] Batch retry failed:', e)
+      }
     },
   },
 })

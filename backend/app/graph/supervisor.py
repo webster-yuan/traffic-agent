@@ -101,8 +101,8 @@ async def supervisor_node(
         writer({
             "type": "stage_start",
             "node": "supervisor",
-            "name": "Supervisorä¸»æ§",
-            "message": "Supervisor åæå½åç¶æï¼å³å®ä¸ä¸æ­¥ Worker",
+            "name": "Supervisor主控",
+            "message": "Supervisor 分析当前状态，决定下一步 Worker",
         })
     except RuntimeError:
         pass
@@ -241,7 +241,7 @@ async def supervisor_node(
                 "type": "thought",
                 "phase": "llm_start",
                 "node": "supervisor",
-                "message": "Supervisorä¸»æ§ LLM å¼å§æ¨ç...",
+                "message": "Supervisor 主控开始推理...",
             })
         except RuntimeError:
             pass
@@ -256,7 +256,7 @@ async def supervisor_node(
                 "type": "thought",
                 "phase": "llm_end",
                 "node": "supervisor",
-                "message": "Supervisorä¸»æ§ LLM æ¨çå®æ",
+                "message": "Supervisor 主控推理完成",
             })
         except RuntimeError:
             pass

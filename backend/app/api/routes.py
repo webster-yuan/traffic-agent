@@ -248,6 +248,12 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                             f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         )
 
+                    elif evt_type == "token_usage":
+                        yield (
+                            "event: token_usage\n"
+                            f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                        )
+
                     continue
 
                 # ── mode == "updates" — node output (replaces on_chain_end) ──
@@ -873,17 +879,21 @@ async def get_model_info() -> dict:
     """
     from app.core.config import settings
     return {
+        "model_name": settings.ollama_model,
         "model": settings.ollama_model,
+        "provider": f"Ollama ({settings.ollama_base_url})",
         "base_url": settings.ollama_base_url,
+        "context_window": 32768,
+        "context_window_estimate": 32768,
         "max_retries": settings.max_retry_count,
         "llm_timeout_seconds": settings.llm_timeout,
-        "context_window_estimate": 32768,
         "capabilities": [
             "structured_output_json_mode",
             "streaming",
             "tool_calling_via_langgraph",
         ],
         "supported_stages": ["quick", "standard", "full"],
+        "stages": ["quick", "standard", "full"],
         "quality_dimensions": ["format", "business", "diversity"],
         "quality_threshold": 70,
     }
