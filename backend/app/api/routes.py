@@ -73,7 +73,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
     start_at = time.perf_counter()
     session_id = uuid.uuid4().hex[:12]
     graph_config = build_graph_config(session_id=session_id, payload=payload)
-    create_session(
+    await create_session(
         session_id=session_id,
         industry=payload.industry,
         scenario="",
@@ -101,7 +101,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             stage=payload.stage,
         )
         write_traffic_parquet(session_id, records, payload.industry)
-        complete_session(
+        await complete_session(
             session_id=session_id,
             scenario=scenario,
             record_count=len(records),
@@ -130,7 +130,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
         # Human-in-the-Loop: graph paused — non-streaming mode cannot handle this
         # Return a response indicating approval is needed
         interrupt_data = gi.value if hasattr(gi, 'value') else gi.args[0] if gi.args else {}
-        update_status(session_id, SessionStatus.processing)
+        await update_status(session_id, SessionStatus.processing)
         _release()
         return TrafficGenerateResponse(
             success=False,
@@ -151,7 +151,7 @@ async def generate_traffic(payload: TrafficGenerateRequest) -> TrafficGenerateRe
             success=False,
             error=str(e),
         )
-        fail_session(session_id, str(e))
+        await fail_session(session_id, str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         _release()
@@ -163,7 +163,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
     await _acquire()
     session_id = uuid.uuid4().hex[:12]
     graph_config = build_graph_config(session_id=session_id, payload=payload)
-    create_session(
+    await create_session(
         session_id=session_id,
         industry=payload.industry,
         scenario="",
@@ -270,7 +270,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
                             first = interrupt_data_raw[0]
                             interrupt_payload = getattr(first, 'value', first)
                             logger.info(f"session_id={session_id} HITL interrupt detected in stream: {interrupt_payload}")
-                            update_status(session_id, SessionStatus.processing)
+                            await update_status(session_id, SessionStatus.processing)
                             yield (
                                 "event: waiting_for_approval\n"
                                 f"data: {json.dumps(interrupt_payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
@@ -338,7 +338,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             # 检查是否被取消
             if is_cancelled(session_id):
                 logger.warning(f"session_id={session_id} 任务被取消")
-                update_status(session_id, SessionStatus.cancelled)
+                await update_status(session_id, SessionStatus.cancelled)
                 yield "event: cancelled\ndata: {\"message\":\"任务已取消\"}\n\n"
                 return
 
@@ -377,7 +377,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             
             # 创建会话记录
             logger.info(f"session_id={session_id} 创建会话记录")
-            complete_session(
+            await complete_session(
                 session_id=session_id,
                 scenario=scenario,
                 record_count=len(records),
@@ -407,14 +407,14 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
             # Human-in-the-Loop: graph paused for approval
             interrupt_data = gi.value if hasattr(gi, 'value') else gi.args[0] if gi.args else {}
             logger.info(f"session_id={session_id} HITL interrupt: {interrupt_data}")
-            update_status(session_id, SessionStatus.processing)  # still processing, waiting for human
+            await update_status(session_id, SessionStatus.processing)  # still processing, waiting for human
             yield (
                 "event: waiting_for_approval\n"
                 f"data: {json.dumps(interrupt_data, ensure_ascii=False, separators=(',', ':'))}\n\n"
             )
         except Exception as e:
             logger.exception(f"session_id={session_id} 发生异常: {e}")
-            fail_session(session_id, str(e))
+            await fail_session(session_id, str(e))
             yield f"event: error\ndata: {{\"message\":\"{str(e)}\"}}\n\n"
         finally:
             remove_cancelled(session_id)
@@ -427,7 +427,7 @@ async def generate_traffic_stream(payload: TrafficGenerateRequest) -> StreamingR
 @router.delete("/generate/{session_id}")
 async def cancel_generate(session_id: str) -> dict[str, str | bool]:
     add_cancelled(session_id)
-    update_status(session_id, SessionStatus.cancelled)
+    await update_status(session_id, SessionStatus.cancelled)
     return {"success": True, "session_id": session_id, "message": "任务已终止"}
 
 
@@ -473,7 +473,7 @@ async def resume_generate(
                 stage=result.get("stage", Stage.standard),
             )
             write_traffic_parquet(session_id, records, result.get("industry", ""))
-            complete_session(
+            await complete_session(
                 session_id=session_id,
                 scenario=scenario,
                 record_count=len(records),
@@ -506,7 +506,7 @@ async def resume_generate(
         }
     except Exception as e:
         logger.exception(f"session_id={session_id} resume failed: {e}")
-        fail_session(session_id, str(e))
+        await fail_session(session_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         _release()
@@ -576,7 +576,7 @@ async def replay_traffic(payload: TrafficReplayRequest) -> TrafficGenerateRespon
         graph_config = build_graph_config(
             session_id=new_session_id, payload=dummy_payload,
         )
-        create_session(
+        await create_session(
             session_id=new_session_id,
             industry=graph_result["industry"],
             scenario=scenario,
@@ -596,7 +596,7 @@ async def replay_traffic(payload: TrafficReplayRequest) -> TrafficGenerateRespon
             scenario=scenario, quality=quality, stage=graph_result["stage"],
         )
         write_traffic_parquet(new_session_id, records, graph_result["industry"])
-        complete_session(
+        await complete_session(
             session_id=new_session_id,
             scenario=scenario,
             record_count=len(records),
@@ -614,7 +614,7 @@ async def replay_traffic(payload: TrafficReplayRequest) -> TrafficGenerateRespon
         )
     except Exception as e:
         if new_session_id:
-            fail_session(new_session_id, str(e))
+            await fail_session(new_session_id, str(e))
         raise
     finally:
         _release()
@@ -625,7 +625,7 @@ async def download_traffic(
     session_id: str,
     file_format: Literal["csv", "json", "parquet"] = Query("csv", alias="format"),
 ) -> FileResponse:
-    file_path = get_session_file(session_id)
+    file_path = await get_session_file(session_id)
     if not file_path:
         raise HTTPException(status_code=404, detail="文件不存在")
     path = Path(file_path)
@@ -670,7 +670,7 @@ async def get_history(
     date_to: date | None = Query(default=None, description="结束日期 (YYYY-MM-DD)"),
     min_quality: float | None = Query(default=None, ge=0, le=100, description="最低评分 (0-100)"),
 ) -> dict:
-    total, items = list_history(
+    total, items = await list_history(
         page, page_size,
         keyword=keyword,
         industry=industry,
@@ -692,12 +692,12 @@ async def get_history(
 
 @router.delete("/history/{session_id}")
 async def remove_history(session_id: str) -> dict[str, str | bool]:
-    file_path = get_session_file(session_id)
+    file_path = await get_session_file(session_id)
     if file_path:
         file = Path(file_path)
         if file.exists():
             file.unlink()
-    delete_session(session_id)
+    await delete_session(session_id)
     return {"success": True, "session_id": session_id, "message": "删除成功"}
 
 
@@ -720,7 +720,7 @@ async def _run_single_task(
             stage=Stage(stage),
         )
         graph_config = build_graph_config(session_id=session_id, payload=payload)
-        create_session(
+        await create_session(
             session_id=session_id,
             industry=industry,
             scenario="",
@@ -733,7 +733,7 @@ async def _run_single_task(
             trace_thread_id=graph_config["configurable"]["thread_id"],
             trace_metadata=graph_config["metadata"],
         )
-        update_batch_task_status(batch_id, task_index, "processing")
+        await update_batch_task_status(batch_id, task_index, "processing")
 
         graph_result = await run_graph(session_id=session_id, payload=payload)
         scenario = graph_result["scenario"]
@@ -745,17 +745,17 @@ async def _run_single_task(
             scenario=scenario, quality=quality, stage=Stage(stage),
         )
         write_traffic_parquet(session_id, records, industry)
-        complete_session(
+        await complete_session(
             session_id=session_id,
             scenario=scenario,
             record_count=len(records),
             file_path=file_path,
             quality=quality,
         )
-        update_batch_task_status(batch_id, task_index, "completed")
+        await update_batch_task_status(batch_id, task_index, "completed")
     except Exception as e:
-        fail_session(session_id, str(e))
-        update_batch_task_status(batch_id, task_index, "failed", str(e))
+        await fail_session(session_id, str(e))
+        await update_batch_task_status(batch_id, task_index, "failed", str(e))
     finally:
         _release()
 
@@ -763,12 +763,12 @@ async def _run_single_task(
 @router.post("/batch")
 async def start_batch(payload: BatchGenerateRequest) -> dict:
     batch_id = uuid.uuid4().hex[:8]
-    create_batch(batch_id)
+    await create_batch(batch_id)
 
     session_ids: list[str] = [uuid.uuid4().hex[:12] for _ in payload.tasks]
 
     for idx, task in enumerate(payload.tasks):
-        add_batch_task(
+        await add_batch_task(
             batch_id=batch_id,
             task_index=idx,
             session_id=session_ids[idx],
@@ -794,7 +794,7 @@ async def start_batch(payload: BatchGenerateRequest) -> dict:
 
 @router.get("/batch/{batch_id}", response_model=BatchStatusResponse)
 async def get_batch_status(batch_id: str) -> BatchStatusResponse:
-    tasks_rows = get_batch_tasks(batch_id)
+    tasks_rows = await get_batch_tasks(batch_id)
     if not tasks_rows:
         raise HTTPException(status_code=404, detail="批次不存在")
 
@@ -829,7 +829,7 @@ async def get_report(session_id: str):
     """Return an HTML report for a completed session."""
     from fastapi.responses import HTMLResponse
 
-    html = generate_report_html(session_id)
+    html = await generate_report_html(session_id)
     if html is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return HTMLResponse(content=html, status_code=200)
@@ -905,7 +905,7 @@ async def retry_failed_batch_tasks(batch_id: str) -> dict:
 
     Only retries tasks with status 'failed' — completed tasks are left untouched.
     """
-    tasks_rows = get_batch_tasks(batch_id)
+    tasks_rows = await get_batch_tasks(batch_id)
     if not tasks_rows:
         raise HTTPException(status_code=404, detail="批次不存在")
 

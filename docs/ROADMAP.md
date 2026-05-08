@@ -103,7 +103,10 @@ SQLite（traffic_sessions / batch_sessions / batch_tasks）
 | 🟢 P2-6 | `trafficStore.ts` HITL 去重（`_handleResume()` 提取） | ✅ |
 | 🟢 P2-7 | 前端 Industries API 加载失败降级（`FALLBACK_INDUSTRIES` 静态列表） | ✅ |
 
-**待处理**：I12（aiosqlite 迁移）、P1-4（routes.py 拆分）
+| 🟠 I12 | aiosqlite 迁移 — `database.py` 从 sync `sqlite3` + thread-local 迁移到 `aiosqlite` async 连接 | ✅ |
+| 🟠 P1-3 | `test_batch.py`/`test_routes.py`/`test_observability_routes.py` 同步 mock → `AsyncMock` | ✅ |
+
+**待处理**：P1-4（routes.py 拆分）
 
 以下问题源于本地 Ollama + qwen2.5:7b 模型能力限制，不是代码问题：
 

@@ -5,7 +5,7 @@
 import asyncio
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core.config import settings
@@ -32,45 +32,45 @@ async def cleanup_old_sessions(days: int = 30) -> dict[str, int]:
     """
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-    with get_connection() as conn:
-        # 查询超过保留天数的会话
-        rows = conn.execute(
-            """
-            SELECT id, file_path, created_at
-            FROM traffic_sessions
-            WHERE created_at < ?
-            """,
-            (cutoff_date.isoformat(),)
-        ).fetchall()
+    conn = await get_connection()
+    cursor = await conn.execute(
+        """
+        SELECT id, file_path, created_at
+        FROM traffic_sessions
+        WHERE created_at < ?
+        """,
+        (cutoff_date.isoformat(),)
+    )
+    rows = await cursor.fetchall()
 
-        deleted_files = []
-        deleted_count = 0
+    deleted_files = []
+    deleted_count = 0
 
-        for row in rows:
-            session_id = row["id"]
-            file_path = row["file_path"]
+    for row in rows:
+        session_id = row["id"]
+        file_path = row["file_path"]
 
-            # 删除 CSV 文件
-            if file_path:
-                try:
-                    path = Path(file_path)
-                    if path.exists():
-                        path.unlink()
-                        deleted_files.append(str(path))
-                except Exception as e:
-                    logger.error(f"删除文件失败 {file_path}: {e}")
-
-            # 删除数据库记录
+        # 删除 CSV 文件
+        if file_path:
             try:
-                conn.execute(
-                    "DELETE FROM traffic_sessions WHERE id = ?",
-                    (session_id,)
-                )
-                deleted_count += 1
+                path = Path(file_path)
+                if path.exists():
+                    path.unlink()
+                    deleted_files.append(str(path))
             except Exception as e:
-                logger.error(f"删除会话记录失败 {session_id}: {e}")
+                logger.error(f"删除文件失败 {file_path}: {e}")
 
-        conn.commit()
+        # 删除数据库记录
+        try:
+            await conn.execute(
+                "DELETE FROM traffic_sessions WHERE id = ?",
+                (session_id,)
+            )
+            deleted_count += 1
+        except Exception as e:
+            logger.error(f"删除会话记录失败 {session_id}: {e}")
+
+    await conn.commit()
 
     logger.info(f"清理完成: 删除 {deleted_count} 个会话记录, {len(deleted_files)} 个文件")
     return {
@@ -79,13 +79,21 @@ async def cleanup_old_sessions(days: int = 30) -> dict[str, int]:
     }
 
 
+async def _dry_run_cleanup(days: int) -> list[dict]:
+    """干运行模式 — 查询但不删除."""
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    conn = await get_connection()
+    cursor = await conn.execute(
+        "SELECT id, file_path, created_at FROM traffic_sessions WHERE created_at < ?",
+        (cutoff_date.isoformat(),)
+    )
+    return [dict(row) for row in await cursor.fetchall()]
+
+
 def cleanup_cancelled_sessions() -> int:
     """清理已取消的会话标记"""
     cancelled = get_cancelled_sessions()
-
-    # 清空取消标记
     cancelled.clear()
-
     return len(cancelled)
 
 
@@ -114,15 +122,10 @@ def main():
 
     if args.dry_run:
         logger.info("干运行模式 - 不实际删除任何文件或记录")
-        with get_connection() as conn:
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=args.days)
-            rows = conn.execute(
-                "SELECT id, file_path, created_at FROM traffic_sessions WHERE created_at < ?",
-                (cutoff_date.isoformat(),)
-            ).fetchall()
-            logger.info(f"将删除 {len(rows)} 个会话记录")
-            for row in rows:
-                logger.info(f"  - {row['id']}: {row['file_path'] or '无文件'}")
+        rows = asyncio.run(_dry_run_cleanup(days=args.days))
+        logger.info(f"将删除 {len(rows)} 个会话记录")
+        for row in rows:
+            logger.info(f"  - {row['id']}: {row.get('file_path') or '无文件'}")
     else:
         # 清理旧会话
         stats = asyncio.run(cleanup_old_sessions(days=args.days))

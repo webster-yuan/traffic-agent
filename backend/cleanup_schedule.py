@@ -5,7 +5,8 @@
 import asyncio
 import schedule
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from app.core.config import settings
 from app.db.database import get_connection
@@ -15,44 +16,45 @@ from app.core.state import get_cancelled_sessions
 async def cleanup_old_sessions() -> dict[str, int]:
     """清理超过保留天数的旧会话"""
     days = getattr(settings, "cleanup_days", 30)
-    cutoff_date = datetime.now(timezone.utc) - time.timedelta(days=days)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, file_path, created_at
-            FROM traffic_sessions
-            WHERE created_at < ?
-            """,
-            (cutoff_date.isoformat(),)
-        ).fetchall()
+    conn = await get_connection()
+    cursor = await conn.execute(
+        """
+        SELECT id, file_path, created_at
+        FROM traffic_sessions
+        WHERE created_at < ?
+        """,
+        (cutoff_date.isoformat(),)
+    )
+    rows = await cursor.fetchall()
 
-        deleted_files = []
-        deleted_count = 0
+    deleted_files = []
+    deleted_count = 0
 
-        for row in rows:
-            session_id = row["id"]
-            file_path = row["file_path"]
+    for row in rows:
+        session_id = row["id"]
+        file_path = row["file_path"]
 
-            if file_path:
-                try:
-                    path = Path(file_path)
-                    if path.exists():
-                        path.unlink()
-                        deleted_files.append(str(path))
-                except Exception as e:
-                    print(f"删除文件失败 {file_path}: {e}")
-
+        if file_path:
             try:
-                conn.execute(
-                    "DELETE FROM traffic_sessions WHERE id = ?",
-                    (session_id,)
-                )
-                deleted_count += 1
+                path = Path(file_path)
+                if path.exists():
+                    path.unlink()
+                    deleted_files.append(str(path))
             except Exception as e:
-                print(f"删除会话记录失败 {session_id}: {e}")
+                print(f"删除文件失败 {file_path}: {e}")
 
-        conn.commit()
+        try:
+            await conn.execute(
+                "DELETE FROM traffic_sessions WHERE id = ?",
+                (session_id,)
+            )
+            deleted_count += 1
+        except Exception as e:
+            print(f"删除会话记录失败 {session_id}: {e}")
+
+    await conn.commit()
 
     return {"deleted_count": deleted_count, "deleted_files": deleted_files}
 
@@ -74,19 +76,14 @@ def scheduled_cleanup():
 
 def main():
     """主函数"""
-    # 从配置读取清理间隔
     schedule_interval = getattr(settings, "cleanup_interval_hours", 24)
-
-    # 添加调度任务
     schedule.every(schedule_interval).hours.do(scheduled_cleanup)
 
     print(f"会话清理调度器已启动，清理间隔: {schedule_interval} 小时")
     print("按 Ctrl+C 停止调度器")
 
-    # 立即执行一次
     scheduled_cleanup()
 
-    # 持续运行
     while True:
         try:
             schedule.run_pending()

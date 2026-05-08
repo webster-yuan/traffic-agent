@@ -122,7 +122,7 @@ class TestRoutes(unittest.TestCase):
             json_p = Path(d) / "traffic_x_abc123.json"
             csv_p.write_text("h\n", encoding="utf-8")
             json_p.write_text('{"metadata":{"ok":true}}', encoding="utf-8")
-            with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
+            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=json")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["metadata"]["ok"])
@@ -131,7 +131,7 @@ class TestRoutes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             csv_p = Path(d) / "traffic_x_abc123.csv"
             csv_p.write_text("h\n", encoding="utf-8")
-            with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
+            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=json")
         self.assertEqual(resp.status_code, 404)
 
@@ -141,7 +141,7 @@ class TestRoutes(unittest.TestCase):
             pq_p = Path(d) / "traffic_x_abc123.parquet"
             csv_p.write_text("h\n", encoding="utf-8")
             pq_p.write_bytes(b"PAR1" + b"\x00" * 4)
-            with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
+            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=parquet")
         self.assertEqual(resp.status_code, 200)
         self.assertIn(resp.headers.get("content-type", ""), ("application/vnd.apache.parquet",))
@@ -241,7 +241,7 @@ class TestRoutes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             csv_p = Path(d) / "traffic_x_abc123.csv"
             csv_p.write_text("h\n", encoding="utf-8")
-            with patch("app.api.routes.get_session_file", lambda _sid: str(csv_p)):
+            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=parquet")
         self.assertEqual(resp.status_code, 404)
 

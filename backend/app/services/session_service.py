@@ -8,7 +8,7 @@ from app.models.schemas import QualityScore, SessionStatus, SessionSummary, Stag
 logger = logging.getLogger(__name__)
 
 
-def create_session(
+async def create_session(
     session_id: str,
     industry: str,
     scenario: str,
@@ -24,50 +24,49 @@ def create_session(
 ) -> None:
     logger.info(f"创建会话: session_id={session_id}, industry={industry}, records={record_count}")
     now = datetime.now(timezone.utc).isoformat()
-    
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO traffic_sessions (
-                id, industry, scenario, stage, status, requested_count, record_count,
-                quality_score, file_path, trace_thread_id, trace_metadata, error_message,
-                started_at, completed_at, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                industry = excluded.industry,
-                scenario = excluded.scenario,
-                stage = excluded.stage,
-                status = excluded.status,
-                requested_count = excluded.requested_count,
-                record_count = excluded.record_count,
-                quality_score = excluded.quality_score,
-                file_path = excluded.file_path,
-                trace_thread_id = excluded.trace_thread_id,
-                trace_metadata = excluded.trace_metadata,
-                error_message = excluded.error_message,
-                updated_at = excluded.updated_at
-            """,
-            (
-                session_id,
-                industry,
-                scenario,
-                stage.value,
-                status.value,
-                requested_count,
-                record_count,
-                quality_score,
-                file_path,
-                trace_thread_id,
-                json.dumps(trace_metadata, ensure_ascii=False) if trace_metadata else None,
-                error_message,
-                now if status in {SessionStatus.pending, SessionStatus.processing} else None,
-                now if status in {SessionStatus.completed, SessionStatus.failed, SessionStatus.cancelled} else None,
-                now,
-                now,
-            ),
+    conn = await get_connection()
+    await conn.execute(
+        """
+        INSERT INTO traffic_sessions (
+            id, industry, scenario, stage, status, requested_count, record_count,
+            quality_score, file_path, trace_thread_id, trace_metadata, error_message,
+            started_at, completed_at, created_at, updated_at
         )
-        conn.commit()
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            industry = excluded.industry,
+            scenario = excluded.scenario,
+            stage = excluded.stage,
+            status = excluded.status,
+            requested_count = excluded.requested_count,
+            record_count = excluded.record_count,
+            quality_score = excluded.quality_score,
+            file_path = excluded.file_path,
+            trace_thread_id = excluded.trace_thread_id,
+            trace_metadata = excluded.trace_metadata,
+            error_message = excluded.error_message,
+            updated_at = excluded.updated_at
+        """,
+        (
+            session_id,
+            industry,
+            scenario,
+            stage.value,
+            status.value,
+            requested_count,
+            record_count,
+            quality_score,
+            file_path,
+            trace_thread_id,
+            json.dumps(trace_metadata, ensure_ascii=False) if trace_metadata else None,
+            error_message,
+            now if status in {SessionStatus.pending, SessionStatus.processing} else None,
+            now if status in {SessionStatus.completed, SessionStatus.failed, SessionStatus.cancelled} else None,
+            now,
+            now,
+        ),
+    )
+    await conn.commit()
 
 
 def _parse_quality_detail(raw: str | None) -> QualityScore | None:
@@ -80,7 +79,7 @@ def _parse_quality_detail(raw: str | None) -> QualityScore | None:
         return None
 
 
-def complete_session(
+async def complete_session(
     session_id: str,
     scenario: str,
     record_count: int,
@@ -89,93 +88,92 @@ def complete_session(
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     qj = quality.model_dump_json()
-    with get_connection() as conn:
-        conn.execute(
+    conn = await get_connection()
+    await conn.execute(
+        """
+        UPDATE traffic_sessions
+        SET status = ?,
+            scenario = ?,
+            record_count = ?,
+            quality_score = ?,
+            file_path = ?,
+            quality_detail = ?,
+            error_message = NULL,
+            completed_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            SessionStatus.completed.value,
+            scenario,
+            record_count,
+            float(quality.total_score),
+            file_path,
+            qj,
+            now,
+            now,
+            session_id,
+        ),
+    )
+    await conn.commit()
+
+
+async def fail_session(session_id: str, error_message: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn = await get_connection()
+    await conn.execute(
+        """
+        UPDATE traffic_sessions
+        SET status = ?, error_message = ?, completed_at = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (SessionStatus.failed.value, error_message, now, now, session_id),
+    )
+    await conn.commit()
+
+
+async def update_status(session_id: str, status: SessionStatus) -> None:
+    logger.info(f"更新会话状态: session_id={session_id}, status={status.value}")
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        conn = await get_connection()
+        await conn.execute(
             """
             UPDATE traffic_sessions
             SET status = ?,
-                scenario = ?,
-                record_count = ?,
-                quality_score = ?,
-                file_path = ?,
-                quality_detail = ?,
-                error_message = NULL,
-                completed_at = ?,
+                completed_at = CASE
+                    WHEN ? IN (?, ?, ?) THEN ?
+                    ELSE completed_at
+                END,
                 updated_at = ?
             WHERE id = ?
             """,
             (
+                status.value,
+                status.value,
                 SessionStatus.completed.value,
-                scenario,
-                record_count,
-                float(quality.total_score),
-                file_path,
-                qj,
+                SessionStatus.failed.value,
+                SessionStatus.cancelled.value,
                 now,
                 now,
                 session_id,
             ),
         )
-        conn.commit()
-
-
-def fail_session(session_id: str, error_message: str) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            UPDATE traffic_sessions
-            SET status = ?, error_message = ?, completed_at = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (SessionStatus.failed.value, error_message, now, now, session_id),
-        )
-        conn.commit()
-
-
-def update_status(session_id: str, status: SessionStatus) -> None:
-    logger.info(f"更新会话状态: session_id={session_id}, status={status.value}")
-    now = datetime.now(timezone.utc).isoformat()
-    
-    try:
-        with get_connection() as conn:
-            conn.execute(
-                """
-                UPDATE traffic_sessions
-                SET status = ?,
-                    completed_at = CASE
-                        WHEN ? IN (?, ?, ?) THEN ?
-                        ELSE completed_at
-                    END,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    status.value,
-                    status.value,
-                    SessionStatus.completed.value,
-                    SessionStatus.failed.value,
-                    SessionStatus.cancelled.value,
-                    now,
-                    now,
-                    session_id,
-                ),
-            )
-            conn.commit()
+        await conn.commit()
         logger.info(f"会话状态更新成功: session_id={session_id}, status={status.value}")
     except Exception as e:
         logger.exception(f"更新会话状态失败: session_id={session_id}, error={e}")
         raise
 
 
-def get_session_file(session_id: str) -> str | None:
+async def get_session_file(session_id: str) -> str | None:
     logger.debug(f"获取会话文件: session_id={session_id}")
-    
     try:
-        with get_connection() as conn:
-            row = conn.execute(
-                "SELECT file_path FROM traffic_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
+        conn = await get_connection()
+        cursor = await conn.execute(
+            "SELECT file_path FROM traffic_sessions WHERE id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
         file_path = row["file_path"] if row else None
         logger.debug(f"会话文件查询结果: session_id={session_id}, file_path={file_path}")
         return file_path
@@ -184,7 +182,7 @@ def get_session_file(session_id: str) -> str | None:
         raise
 
 
-def list_history(
+async def list_history(
     page: int,
     page_size: int,
     *,
@@ -232,24 +230,26 @@ def list_history(
         created_at, updated_at
     """
 
-    with get_connection() as conn:
-        count_row = conn.execute(
-            f"SELECT COUNT(*) AS c FROM traffic_sessions {where_clause}",
-            params,
-        ).fetchone()
-        total = count_row["c"]
+    conn = await get_connection()
+    cursor = await conn.execute(
+        f"SELECT COUNT(*) AS c FROM traffic_sessions {where_clause}",
+        params,
+    )
+    count_row = await cursor.fetchone()
+    total = count_row["c"]
 
-        limit_offset = [page_size, (page - 1) * page_size]
-        rows = conn.execute(
-            f"""
-            SELECT {select_fields}
-            FROM traffic_sessions
-            {where_clause}
-            ORDER BY updated_at DESC, created_at DESC
-            LIMIT ? OFFSET ?
-            """,
-            params + limit_offset,
-        ).fetchall()
+    limit_offset = [page_size, (page - 1) * page_size]
+    cursor = await conn.execute(
+        f"""
+        SELECT {select_fields}
+        FROM traffic_sessions
+        {where_clause}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        params + limit_offset,
+    )
+    rows = await cursor.fetchall()
 
     result = [
         SessionSummary(
@@ -274,23 +274,23 @@ def list_history(
     return total, result
 
 
-def delete_session(session_id: str) -> None:
-    with get_connection() as conn:
-        conn.execute("DELETE FROM traffic_sessions WHERE id = ?", (session_id,))
-        conn.commit()
+async def delete_session(session_id: str) -> None:
+    conn = await get_connection()
+    await conn.execute("DELETE FROM traffic_sessions WHERE id = ?", (session_id,))
+    await conn.commit()
 
 
-def create_batch(batch_id: str) -> None:
+async def create_batch(batch_id: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO batch_sessions (batch_id, created_at) VALUES (?, ?)",
-            (batch_id, now),
-        )
-        conn.commit()
+    conn = await get_connection()
+    await conn.execute(
+        "INSERT INTO batch_sessions (batch_id, created_at) VALUES (?, ?)",
+        (batch_id, now),
+    )
+    await conn.commit()
 
 
-def add_batch_task(
+async def add_batch_task(
     batch_id: str,
     task_index: int,
     session_id: str,
@@ -299,56 +299,57 @@ def add_batch_task(
     count: int,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO batch_tasks (
-                batch_id, task_index, session_id, industry, stage, count,
-                status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
-            """,
-            (batch_id, task_index, session_id, industry, stage, count, now),
-        )
-        conn.commit()
+    conn = await get_connection()
+    await conn.execute(
+        """
+        INSERT INTO batch_tasks (
+            batch_id, task_index, session_id, industry, stage, count,
+            status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """,
+        (batch_id, task_index, session_id, industry, stage, count, now),
+    )
+    await conn.commit()
 
 
-def update_batch_task_status(
+async def update_batch_task_status(
     batch_id: str,
     task_index: int,
     status: str,
     error_message: str | None = None,
 ) -> None:
-    with get_connection() as conn:
-        if error_message:
-            conn.execute(
-                """
-                UPDATE batch_tasks
-                SET status = ?, error_message = ?
-                WHERE batch_id = ? AND task_index = ?
-                """,
-                (status, error_message, batch_id, task_index),
-            )
-        else:
-            conn.execute(
-                """
-                UPDATE batch_tasks
-                SET status = ?
-                WHERE batch_id = ? AND task_index = ?
-                """,
-                (status, batch_id, task_index),
-            )
-        conn.commit()
-
-
-def get_batch_tasks(batch_id: str) -> list[dict]:
-    with get_connection() as conn:
-        rows = conn.execute(
+    conn = await get_connection()
+    if error_message:
+        await conn.execute(
             """
-            SELECT task_index, session_id, industry, stage, count, status, error_message
-            FROM batch_tasks
-            WHERE batch_id = ?
-            ORDER BY task_index
+            UPDATE batch_tasks
+            SET status = ?, error_message = ?
+            WHERE batch_id = ? AND task_index = ?
             """,
-            (batch_id,),
-        ).fetchall()
+            (status, error_message, batch_id, task_index),
+        )
+    else:
+        await conn.execute(
+            """
+            UPDATE batch_tasks
+            SET status = ?
+            WHERE batch_id = ? AND task_index = ?
+            """,
+            (status, batch_id, task_index),
+        )
+    await conn.commit()
+
+
+async def get_batch_tasks(batch_id: str) -> list[dict]:
+    conn = await get_connection()
+    cursor = await conn.execute(
+        """
+        SELECT task_index, session_id, industry, stage, count, status, error_message
+        FROM batch_tasks
+        WHERE batch_id = ?
+        ORDER BY task_index
+        """,
+        (batch_id,),
+    )
+    rows = await cursor.fetchall()
     return [dict(row) for row in rows]

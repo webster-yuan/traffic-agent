@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -44,7 +44,6 @@ class TestBatchRoutes(unittest.TestCase):
         )
 
     def test_batch_create_and_status(self) -> None:
-        """Batch endpoint creates a batch and returns status with tasks."""
         mock_tasks = [
             {
                 "task_index": 0,
@@ -66,13 +65,13 @@ class TestBatchRoutes(unittest.TestCase):
             },
         ]
         with patch(
-            "app.api.routes.create_batch", lambda *args, **kwargs: None
+            "app.api.routes.create_batch", AsyncMock(return_value=None)
         ), patch(
-            "app.api.routes.add_batch_task", lambda *args, **kwargs: None
+            "app.api.routes.add_batch_task", AsyncMock(return_value=None)
         ), patch(
-            "app.api.routes.asyncio.create_task", lambda *args, **kwargs: None
+            "app.api.routes.asyncio.create_task", lambda *a, **kw: None
         ), patch(
-            "app.api.routes.get_batch_tasks", lambda batch_id: mock_tasks
+            "app.api.routes.get_batch_tasks", AsyncMock(return_value=mock_tasks)
         ):
             resp = self.client.post(
                 "/api/v1/traffic/batch",
@@ -90,7 +89,6 @@ class TestBatchRoutes(unittest.TestCase):
             self.assertIsInstance(batch_id, str)
             self.assertEqual(len(batch_id), 8)
 
-            # Check status (still within patch context)
             status_resp = self.client.get(f"/api/v1/traffic/batch/{batch_id}")
             self.assertEqual(status_resp.status_code, 200)
             status_data = status_resp.json()
@@ -99,10 +97,9 @@ class TestBatchRoutes(unittest.TestCase):
             self.assertFalse(status_data["finished"])
 
     def test_batch_all_completed(self) -> None:
-        """Batch status shows finished=True when all tasks are done."""
         with patch(
             "app.api.routes.get_batch_tasks",
-            lambda batch_id: [
+            AsyncMock(return_value=[
                 {
                     "task_index": 0,
                     "session_id": "abc123",
@@ -121,7 +118,7 @@ class TestBatchRoutes(unittest.TestCase):
                     "status": "completed",
                     "error_message": None,
                 },
-            ],
+            ]),
         ):
             status_resp = self.client.get("/api/v1/traffic/batch/testbatch")
         self.assertEqual(status_resp.status_code, 200)
@@ -131,10 +128,9 @@ class TestBatchRoutes(unittest.TestCase):
         self.assertEqual(status_data["tasks"][0]["progress"], 100)
 
     def test_batch_with_failed_task(self) -> None:
-        """Batch status shows mixed completed/failed states."""
         with patch(
             "app.api.routes.get_batch_tasks",
-            lambda batch_id: [
+            AsyncMock(return_value=[
                 {
                     "task_index": 0,
                     "session_id": "abc123",
@@ -153,7 +149,7 @@ class TestBatchRoutes(unittest.TestCase):
                     "status": "failed",
                     "error_message": "LLM timeout",
                 },
-            ],
+            ]),
         ):
             status_resp = self.client.get("/api/v1/traffic/batch/testbatch")
         self.assertEqual(status_resp.status_code, 200)
@@ -164,15 +160,13 @@ class TestBatchRoutes(unittest.TestCase):
         self.assertEqual(status_data["tasks"][1]["error_message"], "LLM timeout")
 
     def test_batch_404_for_unknown_batch(self) -> None:
-        """Batch status returns 404 for unknown batch_id."""
         with patch(
-            "app.api.routes.get_batch_tasks", lambda batch_id: []
+            "app.api.routes.get_batch_tasks", AsyncMock(return_value=[])
         ):
             status_resp = self.client.get("/api/v1/traffic/batch/unknown")
         self.assertEqual(status_resp.status_code, 404)
 
     def test_batch_empty_tasks_rejected(self) -> None:
-        """Batch endpoint rejects empty task list."""
         resp = self.client.post(
             "/api/v1/traffic/batch",
             json={"tasks": []},
@@ -180,7 +174,6 @@ class TestBatchRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
     def test_batch_too_many_tasks_rejected(self) -> None:
-        """Batch endpoint rejects more than 10 tasks."""
         tasks = [{"industry": "ecommerce", "count": 1, "stage": "quick"}] * 11
         resp = self.client.post(
             "/api/v1/traffic/batch",

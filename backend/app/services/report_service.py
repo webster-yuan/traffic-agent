@@ -61,18 +61,19 @@ def _init_chart(chart_id: str, option_js: str) -> str:
 # main
 # ---------------------------------------------------------------------------
 
-def generate_report_html(session_id: str) -> str | None:
+async def generate_report_html(session_id: str) -> str | None:
     """Return a self-contained HTML report string for the given session, or None."""
     # 1. query session from DB
-    with get_connection() as conn:
-        row = conn.execute(
-            """SELECT id, industry, scenario, stage, status, requested_count,
-               record_count, quality_score, quality_detail, trace_thread_id,
-               error_message, started_at, completed_at, created_at, updated_at,
-               file_path
-            FROM traffic_sessions WHERE id = ?""",
-            (session_id,),
-        ).fetchone()
+    conn = await get_connection()
+    cursor = await conn.execute(
+        """SELECT id, industry, scenario, stage, status, requested_count,
+           record_count, quality_score, quality_detail, trace_thread_id,
+           error_message, started_at, completed_at, created_at, updated_at,
+           file_path
+        FROM traffic_sessions WHERE id = ?""",
+        (session_id,),
+    )
+    row = await cursor.fetchone()
 
     if not row:
         return None

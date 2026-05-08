@@ -31,7 +31,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/day"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    await init_db()
     yield
 
 
