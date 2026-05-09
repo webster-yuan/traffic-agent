@@ -67,9 +67,16 @@ START → supervisor → [rag | generate | eval | approval | identity] → super
 - **`services/token_counter.py`**: Token consumption tracking with sliding window stats.
 - **`services/system_metrics.py`**: In-memory P50/P95/P99 latency tracking.
 
-### Routes (`backend/app/api/routes.py`)
+### Routes (`backend/app/api/`)
 
-Single `APIRouter(prefix="/api/v1/traffic")` with SSE streaming (`/generate/stream`), sync generate, HITL resume, history (7-dimension filter), download (csv/json/parquet), ECharts HTML report, checkpoint listing/replay, batch (max 10 tasks with `asyncio.Semaphore(3)` concurrency control), and industries endpoint.
+Routes split by domain into 6 modules under a parent `APIRouter(prefix="/api/v1/traffic")`:
+
+- **`api/generate.py`** — `POST /generate`, `POST /generate/stream` (SSE), `DELETE /generate/{id}`, `POST /resume/{id}` (HITL)
+- **`api/history.py`** — `GET /history` (7-dimension filter + pagination), `DELETE /history/{id}`, `GET /download/{id}` (csv/json/parquet)
+- **`api/batch.py`** — `POST /batch` (max 10 tasks, `asyncio.Semaphore(3)` concurrency), `GET /batch/{id}`, `POST /batch/{id}/retry-failed`
+- **`api/checkpoints.py`** — `GET /checkpoints/{id}`, `POST /replay`
+- **`api/observability.py`** — `GET /report/{id}` (ECharts HTML), `GET /industries`, `GET /metrics`, `GET /model-info`
+- **`api/deps.py`** — shared semaphore + `_run_single_task()` helper
 
 ### Frontend (`frontend/src/`)
 
@@ -105,10 +112,10 @@ When you change a file, run the corresponding test:
 |---|---|
 | `graph/supervisor.py`, `graph/workers.py` | `test_nodes.py` + `test_graph_runner.py` |
 | `services/generator.py`, `services/quality_validator.py` | `test_quality_evaluator.py` + `test_generator_industries.py` |
-| `api/routes.py` | `test_routes.py` (integration) |
+| `api/generate.py` | `test_routes.py`::TestRoutes + `test_batch.py` |
 | `services/session_service.py` | `test_session_service.py` |
 | `core/json_utils.py` | `test_json_utils.py` |
-| Any backend change | `test_routes.py` |
+| `api/history.py`, `api/batch.py`, `api/checkpoints.py`, `api/observability.py` | `test_routes.py` + `test_observability_routes.py` + `test_batch.py` |
 
 ## Environment
 

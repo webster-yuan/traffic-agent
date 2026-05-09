@@ -45,14 +45,18 @@ class TestRoutes(unittest.TestCase):
             passed=True,
         )
         with patch(
-            "app.api.routes.run_graph",
+            "app.api.generate.run_graph",
             new_callable=AsyncMock,
-        ) as mock_run_graph, patch("app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"), patch(
-            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+        ) as mock_run_graph, patch("app.api.generate.write_csv", lambda *args, **kwargs: "tmp.csv"), patch(
+            "app.api.generate.write_traffic_json", lambda *args, **kwargs: "tmp.json"
         ), patch(
-            "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
+            "app.api.generate.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
         ), patch(
-            "app.api.routes.create_session", lambda *args, **kwargs: None
+            "app.api.generate.create_session", AsyncMock()
+        ), patch(
+            "app.api.generate.complete_session", AsyncMock()
+        ), patch(
+            "app.api.deps._acquire", AsyncMock()
         ):
             mock_run_graph.return_value = {
                 "scenario": "通勤高峰",
@@ -98,13 +102,13 @@ class TestRoutes(unittest.TestCase):
                     "generated_records": [rec],
                 }})
 
-        with patch("app.api.routes.get_traffic_graph", lambda: FakeGraph()), patch(
-            "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"
+        with patch("app.api.generate.get_traffic_graph", lambda: FakeGraph()), patch(
+            "app.api.generate.write_csv", lambda *args, **kwargs: "tmp.csv"
         ), patch(
-            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+            "app.api.generate.write_traffic_json", lambda *args, **kwargs: "tmp.json"
         ), patch(
-            "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
-        ), patch("app.api.routes.create_session", lambda *args, **kwargs: None):
+            "app.api.generate.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
+        ), patch("app.api.generate.create_session", AsyncMock()), patch("app.api.deps._acquire", AsyncMock()):
             resp = self.client.post(
                 "/api/v1/traffic/generate/stream",
                 json={"industry": "ride_hailing", "count": 1, "stage": "standard"},
@@ -122,7 +126,7 @@ class TestRoutes(unittest.TestCase):
             json_p = Path(d) / "traffic_x_abc123.json"
             csv_p.write_text("h\n", encoding="utf-8")
             json_p.write_text('{"metadata":{"ok":true}}', encoding="utf-8")
-            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
+            with patch("app.api.history.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=json")
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["metadata"]["ok"])
@@ -131,7 +135,7 @@ class TestRoutes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             csv_p = Path(d) / "traffic_x_abc123.csv"
             csv_p.write_text("h\n", encoding="utf-8")
-            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
+            with patch("app.api.history.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=json")
         self.assertEqual(resp.status_code, 404)
 
@@ -141,7 +145,7 @@ class TestRoutes(unittest.TestCase):
             pq_p = Path(d) / "traffic_x_abc123.parquet"
             csv_p.write_text("h\n", encoding="utf-8")
             pq_p.write_bytes(b"PAR1" + b"\x00" * 4)
-            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
+            with patch("app.api.history.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=parquet")
         self.assertEqual(resp.status_code, 200)
         self.assertIn(resp.headers.get("content-type", ""), ("application/vnd.apache.parquet",))
@@ -171,7 +175,7 @@ class TestRoutes(unittest.TestCase):
                 updated_at=now,
             ),
         ]
-        with patch("app.api.routes.list_history", return_value=(1, mock_items)):
+        with patch("app.api.history.list_history", return_value=(1, mock_items)):
             resp = self.client.get(
                 "/api/v1/traffic/history?page=1&page_size=20&industry=ecommerce"
             )
@@ -206,7 +210,7 @@ class TestRoutes(unittest.TestCase):
                 updated_at=now,
             ),
         ]
-        with patch("app.api.routes.list_history", return_value=(1, mock_items)):
+        with patch("app.api.history.list_history", return_value=(1, mock_items)):
             resp = self.client.get(
                 "/api/v1/traffic/history?page=1&page_size=20&status=failed"
             )
@@ -217,7 +221,7 @@ class TestRoutes(unittest.TestCase):
 
     def test_history_filtering_combined(self) -> None:
         """历史端点组合筛选"""
-        with patch("app.api.routes.list_history", return_value=(0, [])) as mock_fn:
+        with patch("app.api.history.list_history", return_value=(0, [])) as mock_fn:
             resp = self.client.get(
                 "/api/v1/traffic/history?page=1&page_size=10&keyword=test&min_quality=70&date_from=2026-01-01"
             )
@@ -241,7 +245,7 @@ class TestRoutes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             csv_p = Path(d) / "traffic_x_abc123.csv"
             csv_p.write_text("h\n", encoding="utf-8")
-            with patch("app.api.routes.get_session_file", AsyncMock(return_value=str(csv_p))):
+            with patch("app.api.history.get_session_file", AsyncMock(return_value=str(csv_p))):
                 resp = self.client.get("/api/v1/traffic/download/abc123?format=parquet")
         self.assertEqual(resp.status_code, 404)
 
@@ -268,18 +272,20 @@ class TestRoutes(unittest.TestCase):
             passed=True,
         )
         with patch(
-            "app.api.routes.replay_from_checkpoint",
+            "app.api.checkpoints.replay_from_checkpoint",
             new_callable=AsyncMock,
         ) as mock_replay, patch(
-            "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"
+            "app.api.checkpoints.write_csv", lambda *args, **kwargs: "tmp.csv"
         ), patch(
-            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+            "app.api.checkpoints.write_traffic_json", lambda *args, **kwargs: "tmp.json"
         ), patch(
-            "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
+            "app.api.checkpoints.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
         ), patch(
-            "app.api.routes.create_session", lambda *args, **kwargs: None
+            "app.api.checkpoints.create_session", AsyncMock()
         ), patch(
-            "app.api.routes.complete_session", lambda *args, **kwargs: None
+            "app.api.checkpoints.complete_session", AsyncMock()
+        ), patch(
+            "app.api.deps._acquire", AsyncMock()
         ):
             mock_replay.return_value = {
                 "session_id": "replay123abc",
@@ -320,18 +326,20 @@ class TestRoutes(unittest.TestCase):
             total_score=90, passed=True,
         )
         with patch(
-            "app.api.routes.replay_from_checkpoint",
+            "app.api.checkpoints.replay_from_checkpoint",
             new_callable=AsyncMock,
         ) as mock_replay, patch(
-            "app.api.routes.write_csv", lambda *args, **kwargs: "tmp.csv"
+            "app.api.checkpoints.write_csv", lambda *args, **kwargs: "tmp.csv"
         ), patch(
-            "app.api.routes.write_traffic_json", lambda *args, **kwargs: "tmp.json"
+            "app.api.checkpoints.write_traffic_json", lambda *args, **kwargs: "tmp.json"
         ), patch(
-            "app.api.routes.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
+            "app.api.checkpoints.write_traffic_parquet", lambda *args, **kwargs: "tmp.parquet"
         ), patch(
-            "app.api.routes.create_session", lambda *args, **kwargs: None
+            "app.api.checkpoints.create_session", AsyncMock()
         ), patch(
-            "app.api.routes.complete_session", lambda *args, **kwargs: None
+            "app.api.checkpoints.complete_session", AsyncMock()
+        ), patch(
+            "app.api.deps._acquire", AsyncMock()
         ):
             mock_replay.return_value = {
                 "session_id": "replay456def",

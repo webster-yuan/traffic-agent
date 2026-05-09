@@ -7,7 +7,7 @@ import pytest
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.api.routes import _semaphore, _acquire, _release
+from app.api.deps import _semaphore, _acquire, _release
 
 
 class TestConcurrency:

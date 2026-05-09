@@ -10,7 +10,7 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from app.api.routes import router as traffic_router
+from app.api import router as traffic_router
 from app.core.config import settings
 from app.db.database import init_db
 
@@ -41,8 +41,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
-app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
@@ -50,6 +48,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(traffic_router)
 

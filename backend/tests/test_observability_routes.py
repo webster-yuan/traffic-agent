@@ -138,7 +138,7 @@ class TestBatchRetryEndpoint(unittest.TestCase):
         self.client = TestClient(app)
 
     def test_retry_returns_404_for_unknown_batch(self) -> None:
-        with patch("app.api.routes.get_batch_tasks", AsyncMock(return_value=[])):
+        with patch("app.api.batch.get_batch_tasks", AsyncMock(return_value=[])):
             resp = self.client.post("/api/v1/traffic/batch/unknown/retry-failed")
         self.assertEqual(resp.status_code, 404)
 
@@ -154,7 +154,7 @@ class TestBatchRetryEndpoint(unittest.TestCase):
                 "error_message": None,
             },
         ]
-        with patch("app.api.routes.get_batch_tasks", AsyncMock(return_value=mock_tasks)):
+        with patch("app.api.batch.get_batch_tasks", AsyncMock(return_value=mock_tasks)):
             resp = self.client.post("/api/v1/traffic/batch/test/retry-failed")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -183,8 +183,8 @@ class TestBatchRetryEndpoint(unittest.TestCase):
             },
         ]
         with (
-            patch("app.api.routes.get_batch_tasks", AsyncMock(return_value=mock_tasks)),
-            patch("app.api.routes.asyncio.create_task", lambda *args, **kwargs: None),
+            patch("app.api.batch.get_batch_tasks", AsyncMock(return_value=mock_tasks)),
+            patch("app.api.batch.asyncio.create_task", lambda *args, **kwargs: None),
         ):
             resp = self.client.post("/api/v1/traffic/batch/test/retry-failed")
         self.assertEqual(resp.status_code, 200)

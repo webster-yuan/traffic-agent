@@ -142,7 +142,7 @@ async def test_report_no_json_file_fallback():
 
 def test_report_endpoint_returns_html():
     client = TestClient(app)
-    with patch("app.api.routes.generate_report_html") as mock_gen:
+    with patch("app.api.observability.generate_report_html") as mock_gen:
         mock_gen.return_value = "<html><body>Test</body></html>"
         resp = client.get("/api/v1/traffic/report/abc123")
 
@@ -153,7 +153,7 @@ def test_report_endpoint_returns_html():
 
 def test_report_endpoint_404():
     client = TestClient(app)
-    with patch("app.api.routes.generate_report_html", return_value=None):
+    with patch("app.api.observability.generate_report_html", return_value=None):
         resp = client.get("/api/v1/traffic/report/no_such_session")
 
     assert resp.status_code == 404

@@ -65,13 +65,13 @@ class TestBatchRoutes(unittest.TestCase):
             },
         ]
         with patch(
-            "app.api.routes.create_batch", AsyncMock(return_value=None)
+            "app.api.batch.create_batch", AsyncMock(return_value=None)
         ), patch(
-            "app.api.routes.add_batch_task", AsyncMock(return_value=None)
+            "app.api.batch.add_batch_task", AsyncMock(return_value=None)
         ), patch(
-            "app.api.routes.asyncio.create_task", lambda *a, **kw: None
+            "app.api.batch.asyncio.create_task", lambda *a, **kw: None
         ), patch(
-            "app.api.routes.get_batch_tasks", AsyncMock(return_value=mock_tasks)
+            "app.api.batch.get_batch_tasks", AsyncMock(return_value=mock_tasks)
         ):
             resp = self.client.post(
                 "/api/v1/traffic/batch",
@@ -98,7 +98,7 @@ class TestBatchRoutes(unittest.TestCase):
 
     def test_batch_all_completed(self) -> None:
         with patch(
-            "app.api.routes.get_batch_tasks",
+            "app.api.batch.get_batch_tasks",
             AsyncMock(return_value=[
                 {
                     "task_index": 0,
@@ -129,7 +129,7 @@ class TestBatchRoutes(unittest.TestCase):
 
     def test_batch_with_failed_task(self) -> None:
         with patch(
-            "app.api.routes.get_batch_tasks",
+            "app.api.batch.get_batch_tasks",
             AsyncMock(return_value=[
                 {
                     "task_index": 0,
@@ -161,7 +161,7 @@ class TestBatchRoutes(unittest.TestCase):
 
     def test_batch_404_for_unknown_batch(self) -> None:
         with patch(
-            "app.api.routes.get_batch_tasks", AsyncMock(return_value=[])
+            "app.api.batch.get_batch_tasks", AsyncMock(return_value=[])
         ):
             status_resp = self.client.get("/api/v1/traffic/batch/unknown")
         self.assertEqual(status_resp.status_code, 404)
